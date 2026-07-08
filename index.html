@@ -1,353 +1,88 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Percento Pro - Mobile Optimized</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        :root { 
-            --bg: #000000; --card: #1c1c1e; --primary: #0a84ff; 
-            --negative: #ff453a; --text: #ffffff; --subtext: #8e8e93;
-            --accent: #2c2c2e; --success: #32d74b;
-        }
-        /* 防止手機端自動放大與觸控藍框 */
-        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 15px; margin: 0; }
-        .container { width: 100%; max-width: 450px; margin: 0 auto; padding-bottom: 50px; }
-        
-        /* 圖表盒優化 */
-        .chart-box { background: var(--card); padding: 25px; border-radius: 28px; text-align: center; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); position: relative; }
-        #canvas-holder { width: 100%; max-width: 260px; height: 260px; margin: 0 auto; position: relative; }
-        
-        .sync-btn { background: var(--accent); color: var(--primary); border: 1px solid var(--primary); padding: 14px; border-radius: 14px; font-size: 0.95rem; cursor: pointer; margin-top: 15px; font-weight: 600; width: 100%; }
-        .sort-btn { position: absolute; top: 15px; right: 15px; background: rgba(255,255,255,0.1); color: var(--text); border: none; padding: 6px 12px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
-
-        /* 分類清單優化 */
-        .category-group { background: var(--card); border-radius: 20px; margin-bottom: 12px; border: 1px solid #333; overflow: hidden; }
-        .category-header { padding: 18px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-        .category-content { display: none; background: #161616; padding: 10px 15px; border-top: 1px solid #333; }
-        .category-group.open .category-content { display: block; }
-        .detail-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 5px; border-bottom: 1px solid #222; }
-
-        /* 輸入區域：徹底解決手機選單消失問題 */
-        .input-area { background: var(--card); padding: 25px; border-radius: 28px; margin-top: 20px; border: 1px solid #333; }
-        .input-area h3 { margin-top: 0; font-size: 1.2rem; margin-bottom: 15px; }
-
-        input, select { 
-            width: 100% !important; 
-            height: 54px !important; /* 強制高度確保手機可見 */
-            padding: 0 15px !important; 
-            margin: 10px 0 !important; 
-            border: 1px solid #38383a !important; 
-            border-radius: 14px !important; 
-            font-size: 16px !important; /* 防止 iOS 自動縮放畫面 */
-            background: #2c2c2e !important; 
-            color: white !important; 
-            display: block !important;
-            appearance: none; -webkit-appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-            background-repeat: no-repeat; background-position: right 15px center; background-size: 18px;
-        }
-
-        button.btn-primary { width: 100%; padding: 16px; border: none; border-radius: 14px; font-weight: 700; cursor: pointer; background: var(--primary); color: white; font-size: 1rem; margin-top: 10px; }
-        
-        .check-row { display: flex; align-items: center; gap: 10px; margin: 15px 0; font-size: 0.9rem; color: var(--subtext); }
-        .check-row input[type="checkbox"] { width: 22px !important; height: 22px !important; margin: 0 !important; }
-        
-        .qty-badge { background: #3a3a3c; padding: 4px 10px; border-radius: 8px; font-size: 0.85rem; color: var(--primary); display: inline-block; margin-top: 5px; }
-        .price-tag { font-size: 0.75rem; color: var(--success); background: rgba(50, 215, 75, 0.1); padding: 2px 8px; border-radius: 6px; }
-        .remove-link { color: var(--negative); font-size: 0.75rem; margin-top: 8px; display: block; }
-        
-        .legend-card { background: #2c2c2e; border-radius: 20px; padding: 15px; margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .legend-item { display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; }
-        .color-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-    </style>
-</head>
-<body>
-
-<div class="container">
-    <div id="status" style="font-size:0.75rem; text-align:center; color:var(--subtext); margin-bottom:10px;">準備就緒</div>
+function doGet(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  
+  // 功能 1：獲取所有數據 (改為從 A~L 欄讀取)
+  if (e.parameter.action === "getAllData" || e.parameter.action === "getAssets") {
+    var lastRow = sheet.getLastRow();
+    var assets = [];
     
-    <div class="chart-box">
-        <button class="sort-btn" onclick="toggleSortMode()">⇅ 排序</button>
-        <div id="canvas-holder"><canvas id="assetChart"></canvas></div>
-        <div id="todayDisplay" style="color: var(--subtext); font-size: 0.75rem; margin-top:10px;"></div>
-        <button class="sync-btn" id="syncBtn" onclick="syncAllPrices()">🔄 刷新既有項目股價</button>
-        <div class="legend-card" id="chartLegend"></div>
-    </div>
-
-    <div id="categoryList"></div>
-
-    <div class="input-area">
-        <h3>新增項目</h3>
-        <input type="text" id="code" placeholder="代碼 (例: 2330) 或 名稱">
-        <input type="number" id="qty" placeholder="持有數量/金額 (貸款請輸入負數)">
-        
-        <select id="categorySelect">
-            <option value="" disabled selected>載入中...</option>
-        </select>
-        
-        <select id="itemType">
-            <option value="auto">自動抓取即時報價</option>
-            <option value="fixed">固定金額項目</option>
-        </select>
-
-        <label class="check-row">
-            <input type="checkbox" id="enableRepay" onchange="document.getElementById('debtFields').style.display = this.checked ? 'block' : 'none'"> 
-            設定每月自動還款 (僅限貸款)
-        </label>
-        
-        <div id="debtFields" style="display:none; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 14px; margin-bottom: 10px;">
-            <input type="number" id="repayDay" placeholder="還款日(1-31)">
-            <input type="number" id="repayAmount" placeholder="還款金額">
-        </div>
-        
-        <button class="btn-primary" onclick="handleNewItem()">確認加入並同步</button>
-    </div>
-</div>
-
-<script>
-    // 你的 Google Apps Script URL
-    const YOUR_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyTB_NUZLrzPKzvMDmvVTzJVihcGEYk7WhT2luP510cQ1cgsf2nKJQB1HSgyPgufi8v7A/exec";
+    // 如果有資料（排除第一列標題的話，lastRow 需 > 1）
+    if (lastRow > 1) {
+      // 讀取第 2 列開始，到最後一列，共 12 欄 (A~L)
+      var rows = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
+      
+      // 將每列資料對應轉為你的物件格式（請根據你的欄位名稱調整 keys）
+      assets = rows.map(function(row) {
+        return {
+          symbol:   row[0],  // A欄
+          qty:      row[1],  // B欄
+          price:    row[2],  // C欄
+          currency: row[3],  // D欄
+          type:     row[4],  // E欄
+          category: row[5],  // F欄
+          // row[6]~row[11] 對應 G~L 欄，需要可繼續加
+        };
+      });
+    }
     
-    let categories = JSON.parse(localStorage.getItem('percento_cat_order')) || ["台幣活存", "台幣現金流", "台股", "存股", "美股", "美元活存", "投資", "貸款", "其他"];
-    let assets = JSON.parse(localStorage.getItem('percento_dark_data')) || [];
-    const COLORS = ['#0a84ff','#64d2ff','#ff9f0a','#30d158','#bf5af2','#5e5ce6','#64d2ff','#ff453a','#5856d6'];
-    let usdToTwd = 32.5, chart, currentTotal = 0, isSorting = false;
+    var responseData = { "assets": assets, "hiddenCats": [] }; // 若 hiddenCats 有固定儲存格可再另外讀取
+    return ContentService.createTextOutput(JSON.stringify(responseData))
+           .setMimeType(ContentService.MimeType.JSON);
+  }
 
-    // 圓環中心文字插件
-    Chart.register({
-        id: 'centerText',
-        afterDraw: (chart) => {
-            const { ctx, chartArea: { top, bottom, left, right, width, height } } = chart;
-            ctx.save();
-            const text = '$' + Math.round(currentTotal).toLocaleString();
-            ctx.font = `bold 20px sans-serif`;
-            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillStyle = currentTotal < 0 ? '#ff453a' : '#ffffff';
-            ctx.fillText(text, left + width / 2, top + height / 2);
-            ctx.restore();
-        }
-    });
+  // 功能 2：抓股價功能 (維持不變)
+  var symbol = e.parameter.symbol;
+  if (symbol) {
+    var tempCell = sheet.getRange("Y1");
+    tempCell.clearContent();
+    SpreadsheetApp.flush();
+    tempCell.setFormula('=GOOGLEFINANCE("' + symbol + '", "price")');
+    SpreadsheetApp.flush(); 
+    Utilities.sleep(800); 
+    var price = tempCell.getValue();
+    if (price === "#N/A" || isNaN(price) || price === "") { price = null; }
+    return ContentService.createTextOutput(JSON.stringify({price: price}))
+           .setMimeType(ContentService.MimeType.JSON);
+  }
+}
 
-    // 確保選單在手機版成功初始化的保險機制
-    function initCategorySelect() {
-        const select = document.getElementById('categorySelect');
-        if (!select) return;
-        select.innerHTML = '<option value="" disabled selected>選擇分類</option>';
-        categories.forEach(c => {
-            const opt = new Option(c, c);
-            select.add(opt);
-        });
-    }
-
-    async function getPrice(symbol) {
-        const clean = symbol.toUpperCase().replace(".TW", "").trim();
-        try {
-            const res = await fetch(`${YOUR_SCRIPT_URL}?symbol=${encodeURIComponent(clean)}&t=${Date.now()}`);
-            const data = await res.json();
-            return (data.price && data.price !== "#N/A") ? data.price : null;
-        } catch (e) { return null; }
-    }
-
-    async function syncAllPrices() {
-        const btn = document.getElementById('syncBtn');
-        btn.disabled = true; btn.innerText = "⏳ 同步中...";
-        try {
-            const res = await fetch('https://open.er-api.com/v6/latest/USD');
-            const d = await res.json(); usdToTwd = d.rates.TWD;
-        } catch(e) {}
-        for (let i = 0; i < assets.length; i++) {
-            if (assets[i].type === 'auto') {
-                const p = await getPrice(assets[i].symbol);
-                if (p) assets[i].price = p;
-            }
-        }
-        saveAndRefresh();
-        btn.disabled = false; btn.innerText = "🔄 刷新既有項目股價";
-    }
-
-    async function handleNewItem() {
-        const code = document.getElementById('code').value.trim();
-        const qty = Number(document.getElementById('qty').value);
-        const cat = document.getElementById('categorySelect').value;
-        const type = document.getElementById('itemType').value;
-        const isRepay = document.getElementById('enableRepay').checked;
-
-        if (!code || isNaN(qty) || !cat) { alert("請完整填寫項目、數額與分類"); return; }
-
-        let symbol = code.toUpperCase().replace(".TW", "");
-        let price = 1, currency = (cat === "美元活存" || cat === "美股") ? "USD" : "TWD";
-
-        if (type === "auto") {
-            document.getElementById('status').innerText = `🔍 同步 ${symbol}...`;
-            const p = await getPrice(symbol);
-            if (p) price = p;
-            else price = Number(prompt("無法自動抓取價格，請手動輸入：", 0)) || 0;
-        }
-
-        const item = { symbol, qty, price, currency, type, category: cat };
-        if (isRepay) {
-            item.repayDay = Number(document.getElementById('repayDay').value);
-            item.repayAmount = Number(document.getElementById('repayAmount').value);
-        }
-        
-        assets.push(item);
-        saveAndRefresh();
-        document.getElementById('code').value = ''; document.getElementById('qty').value = '';
-    }
-
-    function toggleSortMode() { isSorting = !isSorting; refresh(); }
-    function moveCat(idx, dir) {
-        const target = idx + dir;
-        if (target < 0 || target >= categories.length) return;
-        [categories[idx], categories[target]] = [categories[target], categories[idx]];
-        localStorage.setItem('percento_cat_order', JSON.stringify(categories));
-        initCategorySelect(); refresh();
-    }
-
-    function saveAndRefresh() { localStorage.setItem('percento_dark_data', JSON.stringify(assets)); refresh(); }
-
-    function refresh() {
-        const container = document.getElementById('categoryList');
-        container.innerHTML = '';
-        currentTotal = 0;
-        const curDay = new Date().getDate();
-        document.getElementById('todayDisplay').innerText = `今天是 ${new Date().getMonth()+1} 月 ${curDay} 日`;
-
-        const groups = {};
-        categories.forEach(c => groups[c] = { sum: 0, items: [] });
-
-        assets.forEach((a, i) => {
-            let finalQty = a.qty;
-            let isRepaid = false;
-            if (a.qty < 0 && a.repayDay > 0 && curDay >= a.repayDay) {
-                finalQty = a.qty + a.repayAmount;
-                if (finalQty > 0) finalQty = 0;
-                isRepaid = true;
-            }
-            const val = a.currency === 'USD' ? (a.price * finalQty * usdToTwd) : (a.price * finalQty);
-            if (groups[a.category]) {
-                groups[a.category].sum += val;
-                currentTotal += val;
-                groups[a.category].items.push({...a, displayQty: finalQty, val, i, isRepaid});
-            }
-        });
-
-        categories.forEach((name, idx) => {
-            const g = groups[name];
-            if (!isSorting && g.items.length === 0) return;
-            container.innerHTML += `
-                <div class="category-group">
-                    <div class="category-header" onclick="if(!isSorting) this.parentElement.classList.toggle('open')">
-                        <span style="font-weight:600">${name}</span>
-                        ${isSorting ? `
-                            <div>
-                                <button class="sort-btn" style="position:static" onclick="event.stopPropagation(); moveCat(${idx},-1)">↑</button>
-                                <button class="sort-btn" style="position:static" onclick="event.stopPropagation(); moveCat(${idx},1)">↓</button>
-                            </div>
-                        ` : `
-                            <span style="font-weight:700; color:${g.sum < 0 ? 'var(--negative)' : 'var(--primary)'}">$${Math.round(g.sum).toLocaleString()}</span>
-                        `}
-                    </div>
-                    <div class="category-content">
-${g.items.map(item => `
-    <div class="detail-item">
-        <div>
-            <b onclick="const n=prompt('改名', '${item.symbol}'); if(n){assets[${item.i}].symbol=n; saveAndRefresh();}">${item.symbol}</b><br>
-            <div class="qty-badge">${item.displayQty.toLocaleString()} ${item.category.includes('股')?'股':(item.currency==='USD'?'美元':'台幣')}</div>
-            
-            ${item.type === 'auto' ? `
-                <div class="price-tag" style="${item.currency === 'USD' ? 'background:rgba(10, 132, 255, 0.1); color:var(--primary)' : ''}">
-                    ${item.currency} ${item.price.toFixed(2)}
-                </div>
-            ` : ''}
-
-            ${item.isRepaid ? `<br><span class="price-tag" style="background:rgba(50,215,75,0.1); color:var(--success)">本月已還款</span>` : ''}
-        </div>
-        <div style="text-align:right">
-            <div style="font-weight:700; color:${item.val < 0 ? 'var(--negative)' : 'white'}">$${Math.round(item.val).toLocaleString()}</div>
-            <span class="remove-link" onclick="if(confirm('確定移除？')){assets.splice(${item.i},1); saveAndRefresh();}">移除</span>
-        </div>
-    </div>
-`).join('')}
-                    </div>
-                </div>`;
-        });
-        updateChart(groups);
-    }
-
-    function updateChart(groups) {
-        const ctx = document.getElementById('assetChart').getContext('2d');
-        const legend = document.getElementById('chartLegend'); legend.innerHTML = '';
-        if (chart) chart.destroy();
-        const labels = [], data = [], bg = [];
-        let absTotal = 0; categories.forEach(c => absTotal += Math.abs(groups[c].sum));
-
-        categories.forEach((cat, i) => {
-            if (groups[cat].sum !== 0) {
-                const val = Math.abs(groups[cat].sum);
-                const color = COLORS[i % COLORS.length];
-                labels.push(cat); data.push(val); bg.push(color);
-                legend.innerHTML += `<div class="legend-item"><div style="display:flex; align-items:center"><div class="color-dot" style="background:${color}"></div>${cat}</div><div>${absTotal?((val/absTotal)*100).toFixed(1):0}%</div></div>`;
-            }
-        });
-chart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { 
-        labels: labels, // 補回標籤，Tooltip 才能顯示名稱
-        datasets: [{ 
-            data, 
-            backgroundColor: bg, 
-            borderWidth: 2, // 稍微增加邊框感
-            borderColor: 'var(--card)', // 邊框顏色與背景一致
-            hoverOffset: 15 // 關鍵：滑鼠靠近時彈出的距離
-        }]
-    },
-    options: { 
-        cutout: '75%', // 稍微調細一點點，放大效果更明顯
-        plugins: { 
-            legend: { display: false }, // 依然隱藏上方預設圖例，使用我們自製的
-            tooltip: {
-                enabled: true, // 開啟提示框
-                backgroundColor: 'rgba(28, 28, 30, 0.9)', // 深色背景
-                titleFont: { size: 14 },
-                bodyFont: { size: 14 },
-                padding: 12,
-                cornerRadius: 10,
-                displayColors: true, // 顯示顏色小點
-                callbacks: {
-                    label: function(context) {
-                        let label = context.label || '';
-                        let value = context.parsed || 0;
-                        let percent = ((value / absTotal) * 100).toFixed(1);
-                        return ` ${label}: $${Math.round(value).toLocaleString()} (${percent}%)`;
-                    }
-                }
-            }
-        }, 
-        maintainAspectRatio: false,
-        layout: {
-            padding: 10 // 給予一點緩衝空間讓它彈出時不會被切到
-        },
-        // 點擊或滑鼠靠近時的動畫
-        animation: {
-            animateRotate: true,
-            animateScale: true
-        }
-    }
-});
-    }
-
-    // 啟動初始化
-    window.onload = () => {
-        initCategorySelect();
-        refresh();
-    };
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  try {
+    var payload = JSON.parse(e.postData.contents);
     
-    // 手機版載入補強機制
-    setTimeout(initCategorySelect, 500);
-</script>
-</body>
-</html>
+    // 功能：儲存所有數據 (改為寫入 A~L 欄)
+    if (payload.action === "saveAllData" || payload.action === "saveAssets") {
+      var dataToSave = payload.hiddenCats ? payload : payload.data;
+      var assets = dataToSave.assets || [];
+      
+      // 1. 先清空第 2 列以下、A~L 欄的舊資料
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        sheet.getRange(2, 1, lastRow - 1, 12).clearContent();
+      }
+      
+      // 2. 如果有新資料，轉成二維陣列後寫入
+      if (assets.length > 0) {
+        var outputValues = assets.map(function(item) {
+          return [
+            item.symbol   || "", // A欄
+            item.qty      || 0,  // B欄
+            item.price    || 0,  // C欄
+            item.currency || "", // D欄
+            item.type     || "", // E欄
+            item.category || "", // F欄
+            "", "", "", "", "", "" // G~L 欄預留，若有欄位請自行補上對應 item 屬性
+          ];
+        });
+        
+        // 一次性寫入試算表
+        sheet.getRange(2, 1, outputValues.length, 12).setValues(outputValues);
+      }
+      
+      return ContentService.createTextOutput("Saved").setMimeType(ContentService.MimeType.TEXT);
+    }
+  } catch (err) {
+    return ContentService.createTextOutput("Error: " + err.message).setMimeType(ContentService.MimeType.TEXT);
+  }
+}
