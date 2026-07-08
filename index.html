@@ -603,7 +603,33 @@ assets.forEach((item, idx) => {
         const notProcessedThisMonth = (item.lastProcessedMonth !== currentYearMonth);
 
         if (isTimeUp && notProcessedThisMonth) {
-            if (twdCashItem) {
+        // 1. 如果是貸款，走 PMT 自動拆利息公式
+          if (item.category === '貸款') {
+            const totalRepay = Number(item.repayAmount) || 0; 
+            const annualRate = Number(item.interestRate) || 0; // 從 M 欄讀取
+            const currentLoanBalance = Math.abs(Number(item.qty)) || 0; 
+
+            let principalPaid = totalRepay; 
+
+            if (annualRate > 0 && currentLoanBalance > 0) {
+                const monthlyRate = (annualRate / 100) / 12; 
+                const interestPaid = currentLoanBalance * monthlyRate; 
+                principalPaid = totalRepay - interestPaid; 
+                if (principalPaid < 0) principalPaid = 0; 
+            }
+
+            // 1. 更新剩餘貸款本金
+            assets[idx].qty += Number(principalPaid.toFixed(2));
+            
+            // 2. 自動將已還期數（O欄）加 1
+            assets[idx].paidPeriods = (Number(assets[idx].paidPeriods) || 0) + 1;
+            
+            assets[idx].lastProcessedMonth = currentYearMonth;
+            needsSave = true;
+            console.log(`[貸款自動化] 項目:${item.symbol}, 利息:${(totalRepay - principalPaid).toFixed(0)}, 實還本金:${principalPaid.toFixed(0)}`);
+          
+          // 2. 如果是一般收支，維持你原本的連動台幣現金邏輯
+          } else if (twdCashItem) {
                 // 取得要變動的金額：優先使用修改過的固定扣款金額 repayAmount，若無則使用 qty
                 const baseAmount = item.repayAmount || item.qty || 0;
                 const val = item.currency === 'USD' ? (item.price * baseAmount * usdToTwd) : (item.price * baseAmount);
