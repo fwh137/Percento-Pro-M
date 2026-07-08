@@ -1,88 +1,1112 @@
-function doGet(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  
-  // 功能 1：獲取所有數據 (改為從 A~L 欄讀取)
-  if (e.parameter.action === "getAllData" || e.parameter.action === "getAssets") {
-    var lastRow = sheet.getLastRow();
-    var assets = [];
-    
-    // 如果有資料（排除第一列標題的話，lastRow 需 > 1）
-    if (lastRow > 1) {
-      // 讀取第 2 列開始，到最後一列，共 12 欄 (A~L)
-      var rows = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
-      
-      // 將每列資料對應轉為你的物件格式（請根據你的欄位名稱調整 keys）
-      assets = rows.map(function(row) {
-        return {
-          symbol:   row[0],  // A欄
-          qty:      row[1],  // B欄
-          price:    row[2],  // C欄
-          currency: row[3],  // D欄
-          type:     row[4],  // E欄
-          category: row[5],  // F欄
-          // row[6]~row[11] 對應 G~L 欄，需要可繼續加
-        };
-      });
-    }
-    
-    var responseData = { "assets": assets, "hiddenCats": [] }; // 若 hiddenCats 有固定儲存格可再另外讀取
-    return ContentService.createTextOutput(JSON.stringify(responseData))
-           .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  // 功能 2：抓股價功能 (維持不變)
-  var symbol = e.parameter.symbol;
-  if (symbol) {
-    var tempCell = sheet.getRange("Y1");
-    tempCell.clearContent();
-    SpreadsheetApp.flush();
-    tempCell.setFormula('=GOOGLEFINANCE("' + symbol + '", "price")');
-    SpreadsheetApp.flush(); 
-    Utilities.sleep(800); 
-    var price = tempCell.getValue();
-    if (price === "#N/A" || isNaN(price) || price === "") { price = null; }
-    return ContentService.createTextOutput(JSON.stringify({price: price}))
-           .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  try {
-    var payload = JSON.parse(e.postData.contents);
-    
-    // 功能：儲存所有數據 (改為寫入 A~L 欄)
-    if (payload.action === "saveAllData" || payload.action === "saveAssets") {
-      var dataToSave = payload.hiddenCats ? payload : payload.data;
-      var assets = dataToSave.assets || [];
-      
-      // 1. 先清空第 2 列以下、A~L 欄的舊資料
-      var lastRow = sheet.getLastRow();
-      if (lastRow > 1) {
-        sheet.getRange(2, 1, lastRow - 1, 12).clearContent();
-      }
-      
-      // 2. 如果有新資料，轉成二維陣列後寫入
-      if (assets.length > 0) {
-        var outputValues = assets.map(function(item) {
-          return [
-            item.symbol   || "", // A欄
-            item.qty      || 0,  // B欄
-            item.price    || 0,  // C欄
-            item.currency || "", // D欄
-            item.type     || "", // E欄
-            item.category || "", // F欄
-            "", "", "", "", "", "" // G~L 欄預留，若有欄位請自行補上對應 item 屬性
-          ];
-        });
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Percento Pro - Mobile Optimized</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { 
+            --bg: #000000; --card: #1c1c1e; --primary: #0a84ff; 
+            --negative: #ff453a; --text: #ffffff; --subtext: #8e8e93;
+            --accent: #2c2c2e; --success: #32d74b;
+        }
+        /* 防止手機端自動放大與觸控藍框 */
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 15px; margin: 0; }
+        .container { width: 100%; max-width: 450px; margin: 0 auto; padding-bottom: 50px; }
         
-        // 一次性寫入試算表
-        sheet.getRange(2, 1, outputValues.length, 12).setValues(outputValues);
-      }
-      
-      return ContentService.createTextOutput("Saved").setMimeType(ContentService.MimeType.TEXT);
-    }
-  } catch (err) {
-    return ContentService.createTextOutput("Error: " + err.message).setMimeType(ContentService.MimeType.TEXT);
-  }
+        /* 圖表盒優化 */
+        .chart-box { background: var(--card); padding: 25px; border-radius: 28px; text-align: center; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); position: relative; }
+        #canvas-holder { width: 100%; max-width: 260px; height: 260px; margin: 0 auto; position: relative; }
+        
+        .sync-btn { background: var(--accent); color: var(--primary); border: 1px solid var(--primary); padding: 14px; border-radius: 14px; font-size: 0.95rem; cursor: pointer; margin-top: 15px; font-weight: 600; width: 100%; }
+.sort-btn {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: rgba(255, 255, 255, 0.1); /* 半透明玻璃質感 */
+    color: var(--text);
+    border: 1px solid rgba(255, 255, 255, 0.2); /* 纖細的邊框 */
+    display: flex;          /* 🔴 新增：開啟彈性佈局 */
+    align-items: center;    /* 🔴 新增：垂直置中 */
+    justify-content: center;/* 🔴 新增：水平置中 */
+    padding: 6px 14px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(5px); /* 毛玻璃效果，讓按鈕更有質感 */
 }
+
+/* 點擊時的視覺回饋 */
+.sort-btn:active {
+    transform: scale(0.95);
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.eye-btn {
+    position: absolute;
+    top: 15px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+    cursor: pointer;
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* 這裡設定你要的固定大小 */
+    width: 60px; 
+    height: 32px;
+    transition: all 0.2s ease;
+}
+
+.eye-btn:active { transform: scale(0.95); }
+
+        /* 分類清單優化 */
+        .category-group { background: var(--card); border-radius: 20px; margin-bottom: 12px; border: 1px solid #333; overflow: hidden; }
+        .category-header { padding: 18px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .category-content { display: none; background: #161616; padding: 10px 15px; border-top: 1px solid #333; }
+        .category-group.open .category-content { display: block; }
+        .detail-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 5px; border-bottom: 1px solid #222; }
+
+        /* 輸入區域：徹底解決手機選單消失問題 */
+        .input-area { background: var(--card); padding: 25px; border-radius: 28px; margin-top: 20px; border: 1px solid #333; }
+        .input-area h3 { margin-top: 0; font-size: 1.2rem; margin-bottom: 15px; }
+
+input:not([type="checkbox"]), select { 
+    width: 100% !important; 
+    height: 54px !important; /* 強制高度確保手機可見 */
+            padding: 0 15px !important; 
+            margin: 10px 0 !important; 
+            border: 1px solid #38383a !important; 
+            border-radius: 14px !important; 
+            font-size: 16px !important; /* 防止 iOS 自動縮放畫面 */
+            background: #2c2c2e !important; 
+            color: white !important; 
+            display: block !important;
+            appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 15px center; background-size: 18px;
+        }
+
+        button.btn-primary { width: 100%; padding: 16px; border: none; border-radius: 14px; font-weight: 700; cursor: pointer; background: var(--primary); color: white; font-size: 1rem; margin-top: 10px; }
+        
+        .check-row { display: flex; align-items: center; gap: 10px; margin: 5px 0; font-size: 0.9rem; color: var(--subtext); }
+        .check-row input[type="checkbox"] { width: 22px !important; height: 22px !important; margin: 0 !important; }
+        
+        .qty-badge { background: #3a3a3c; padding: 4px 10px; border-radius: 8px; font-size: 0.85rem; color: var(--primary); display: inline-block; margin-top: 5px; }
+        .price-tag { font-size: 0.75rem; color: var(--success); background: rgba(50, 215, 75, 0.1); padding: 2px 8px; border-radius: 6px; }
+        .remove-link { color: var(--negative); font-size: 0.75rem; margin-top: 8px; display: block; }
+        
+        .legend-card { background: #2c2c2e; border-radius: 20px; padding: 15px; margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .legend-item { display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; }
+        .color-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+
+/* --- 讓按鍵呈現圓形、磨砂質感的 iOS 風格 --- */
+/* --- 優化後的按鍵樣式 --- */
+.num-key {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: none;
+    font-size: 1.8rem;
+    font-weight: 400;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    
+/* 設定基礎 transition，確保回彈平滑 */
+    transition: transform 0.1s ease-out, background 0.1s ease-out; 
+    
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* 點擊時的視覺回饋：稍微放大 + 變亮 */
+.num-key:active {
+    transform: scale(1.2) !important; /* 🔴 關鍵：放大 1.2 倍 */
+    background-color: rgba(255, 255, 255, 0.4) !important; /* 變亮 */
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.2); /* 增加一點點光暈感 */
+    transition: transform 0.02s ease-out !important; /* 點下去要快，回彈稍微慢一點 */
+}
+
+/* 滑鼠懸停效果 (電腦版專屬優化) */
+.num-key:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* 替換後的版本：包含顏色、縮放動畫 */
+.dot-filled {
+    background-color: white !important;
+    animation: dot-pop 0.2s ease-out !important; /* 觸發跳動動畫 */
+}
+
+/* 這是動畫的定義，也要記得貼進 CSS 裡 */
+@keyframes dot-pop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.5); }
+    100% { transform: scale(1); }
+}
+
+/* --- 🔴 強制修正：讓 Checkbox 變身 iOS 滑塊 --- */
+.check-row {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    padding: 15px 0 !important;
+    cursor: pointer !important;
+}
+
+/* 1. 軌道：強制覆蓋掉原本 input 的 100% 寬度與 54px 高度 */
+.check-row input[type="checkbox"] {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    position: relative !important;
+    width: 48px !important;      /* 固定滑塊寬度 */
+    height: 26px !important;     /* 固定滑塊高度 */
+    background: #3a3a3c !important; /* 預設灰色背景 */
+    border-radius: 20px !important;
+    border: none !important;
+    margin: 0 !important;        /* 移除原本的外距 */
+    padding: 0 !important;
+    cursor: pointer !important;
+    transition: background 0.3s !important;
+    background-image: none !important; /* 移除原本的下拉箭頭圖案 */
+    flex-shrink: 0;
+}
+
+/* 2. 白色圓點：利用偽元素畫出來 */
+.check-row input[type="checkbox"]::after {
+    content: "" !important;
+    position: absolute !important;
+    top: 2px !important;
+    left: 2px !important;
+    width: 22px !important;
+    height: 22px !important;
+    background: white !important;
+    border-radius: 50% !important;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+    display: block !important;
+}
+
+/* 3. 開啟狀態：背景變亮灰色 */
+.check-row input[type="checkbox"]:checked {
+    background: #8e8e93 !important; 
+}
+
+/* 4. 開啟狀態：圓點右移 */
+.check-row input[type="checkbox"]:checked::after {
+    transform: translateX(22px) !important;
+}
+
+/* 修正文字大小與顏色 */
+.check-row {
+    color: var(--subtext);
+    font-size: 0.95rem;
+}
+
+/* 🔴 新增：美股（USD）專用的藍色標籤樣式 */
+.price-tag-usd {
+    /* 調整為更像圖片中的暗藍色背景 */
+    background: rgba(10, 132, 255, 0.2) !important; 
+    /* 調整為更亮、更飽和的淺藍色文字 */
+    color: #64d2ff !important; 
+    border: 1px solid rgba(10, 132, 255, 0.3) !important; /* 加一點纖細的邊框增強質感 */
+}
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="status" style="font-size:0.75rem; text-align:center; color:var(--subtext); margin-bottom:10px;">準備就緒</div>
+    
+    <div class="chart-box">
+        <button class="eye-btn" id="hideBtn" style="left: 15px;" onclick="toggleHide()">🙈</button>
+<button class="sort-btn" onclick="toggleSortMode()">⇅ 排序</button>
+
+        <div id="canvas-holder"><canvas id="assetChart"></canvas></div>
+        <div id="todayDisplay" style="color: var(--subtext); font-size: 0.75rem; margin-top:10px;"></div>
+<div style="display: flex; gap: 10px; margin-top: 15px;">
+    <button class="sync-btn" onclick="updatePrices('TWD')" style="flex: 1; margin-top: 0;">
+         🔄 更新現有. . .🇹 🇼股價
+    </button>
+<button class="sync-btn" onclick="updatePrices('USD')" style="flex: 1; margin-top: 0;">🔄 更新現有. . .🇺 🇸股價
+    </button>
+</div>
+        <div class="legend-card" id="chartLegend"></div>
+    </div>
+
+    <div id="categoryList"></div>
+
+    <div class="input-area">
+        <h3>新增項目</h3>
+        <input type="text" id="code" placeholder="代碼 (例: 2330) 或 名稱">
+        <input type="number" id="qty" placeholder="持有數量/金額 (貸款請輸入負數)">
+        
+        <select id="categorySelect">
+            <option value="" disabled selected>載入中...</option>
+        </select>
+        
+        <select id="itemType">
+            <option value="auto">自動抓取即時報價</option>
+            <option value="fixed">固定金額項目</option>
+        </select>
+
+        <label class="check-row">
+            <input type="checkbox" id="enableRepay" onchange="document.getElementById('debtFields').style.display = this.checked ? 'block' : 'none'"> 
+            每月固定支出/還款 (自動扣款)
+        </label>
+
+<div id="debtFields" style="display:none; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 14px; margin-top: 5px; margin-bottom: 5px;">
+    <input type="number" id="repayDay" placeholder="還款日(1-31)">
+    <input type="number" id="repayAmount" placeholder="還款金額">
+</div>
+        
+        <button class="btn-primary" onclick="handleNewItem()">確認加入並同步</button>
+    </div>
+</div>
+
+<script>
+let currentInputPwd = "";
+let pendingCat = ""; 
+let pwdMode = ""; // 紀錄模式：'unlockEye' 或 'unhideCat'
+const SET_PASSWORD = "5257";    // 眼睛切換密碼
+const UNHIDE_PASSWORD = "5757"; // 開啟隱藏分類密碼
+
+    // 你的 Google Apps Script URL
+    const YOUR_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbymGrkXe24-JaWEvT6lYMQBaBsyYTy5_lAiDfIxAORQ_yYqoCfYxgRLgXCjR0BETyqC/exec";
+    
+// 1. 先讀取舊有的排序
+let savedCats = JSON.parse(localStorage.getItem('percento_cat_order')) || [];
+
+// 2. 定義「一定要有」的標準分類
+const defaultCats = ["台幣活存", "台幣現金", "台股", "存股", "美股", "美元活存", "投資", "貸款", "其他", "收入", "支出"];
+
+// 3. 合併：保留舊排序，並補上清單中「缺少的」預設分類
+let categories = [...savedCats];
+defaultCats.forEach(cat => {
+    if (!categories.includes(cat)) {
+        categories.push(cat); // 如果舊資料沒這個分類，就補在最後面
+    }
+});
+
+let assets = JSON.parse(localStorage.getItem('percento_dark_data')) || [];
+let isHidden = true;
+let isVerified = false;
+// 紀錄哪些分類被手動隱藏了
+let hiddenCategories = JSON.parse(localStorage.getItem('percento_hidden_cats')) || [];
+
+    const COLORS = ['#0a84ff','#64d2ff','#ff9f0a','#30d158','#bf5af2','#5e5ce6','#64d2ff','#ff453a','#5856d6','#0a84ff','#ff453a'];
+    let usdToTwd = 32.5, chart, currentTotal = 0, isSorting = false;
+
+    // 圓環中心文字插件
+    Chart.register({
+        id: 'centerText',
+        afterDraw: (chart) => {
+            const { ctx, chartArea: { top, bottom, left, right, width, height } } = chart;
+            ctx.save();
+const text = isHidden ? '$***,***' : '$' + Math.round(currentTotal).toLocaleString(); 
+        ctx.font = `bold 18px sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = currentTotal < 0 ? '#ff453a' : '#ffffff';
+        ctx.fillText(text, left + width / 2, top + height / 2);
+        ctx.restore();
+    }
+});
+
+    // 確保選單在手機版成功初始化的保險機制
+    function initCategorySelect() {
+        const select = document.getElementById('categorySelect');
+        if (!select) return;
+        select.innerHTML = '<option value="" disabled selected>選擇分類</option>';
+        categories.forEach(c => {
+            const opt = new Option(c, c);
+            select.add(opt);
+        });
+    }
+
+    async function getPrice(symbol) {
+        const clean = symbol.toUpperCase().replace(".TW", "").trim();
+        try {
+            const res = await fetch(`${YOUR_SCRIPT_URL}?symbol=${encodeURIComponent(clean)}&t=${Date.now()}`);
+            const data = await res.json();
+            return (data.price && data.price !== "#N/A") ? data.price : null;
+        } catch (e) { return null; }
+    }
+
+// 🔴 修改：加入 targetCurrency 參數，接收來自按鈕的 'TWD' 或 'USD'
+async function updatePrices(targetCurrency) {
+    // 🔴 確保獲取當前點擊的按鈕（這行非常重要，否則會報 btn is not defined）
+    const btn = event.currentTarget;
+    const originalText = btn.innerText;
+    
+    btn.disabled = true; 
+    btn.innerText = "⏳ 同步中...";
+
+    try {
+        // 更新匯率 (保持原樣)
+        const res = await fetch('https://open.er-api.com/v6/latest/USD');
+        const d = await res.json(); 
+        usdToTwd = d.rates.TWD;
+    } catch(e) { 
+        console.log("匯率更新失敗"); 
+    }
+
+    // 🔴 迴圈更新價格
+    for (let i = 0; i < assets.length; i++) {
+        // 必須同時滿足「自動更新」且「幣別相符」才抓取
+        if (assets[i].type === 'auto' && assets[i].currency === targetCurrency) {
+            const queryTarget = assets[i].originalSymbol || assets[i].symbol;
+
+            const latestPrice = await getPrice(queryTarget);
+            if (latestPrice) {
+                assets[i].price = latestPrice;
+            }
+        }
+    } // <--- 🔴 這是 for 迴圈的結束
+
+    // 🔴 以下動作在迴圈結束後只會執行一次
+    saveAndRefresh(); 
+    btn.disabled = false; 
+    btn.innerText = originalText; // 恢復原本按鈕文字
+    
+    alert(`${targetCurrency === 'TWD' ? '台股' : '美股'}數據更新完成！`);
+}
+    
+
+async function handleNewItem() {
+    const code = document.getElementById('code').value.trim();
+    const cat = document.getElementById('categorySelect').value;
+    
+    if (!code || !cat) { alert("請填寫名稱與選擇分類"); return; }
+
+    // --- 🔴 隱藏指令檢查 ---
+    if (code === "隱藏") {
+    if (!cat) { alert("請選擇要隱藏的分類"); return; }
+    if (!hiddenCategories.includes(cat)) {
+        hiddenCategories.push(cat);
+        localStorage.setItem('percento_hidden_cats', JSON.stringify(hiddenCategories));
+    }
+    // 不顯示任何提示文字，直接清空並刷新
+    document.getElementById('code').value = '';
+    refresh();
+    return; 
+}
+
+if (code === "開啟") {
+    if (!cat) { alert("請選擇要開啟的分類"); return; }
+        pendingCat = cat; // 紀錄分類名稱
+        pwdMode = "unhideCat";
+        showPwdModal();   // 呼叫自定義鍵盤
+        document.getElementById('code').value = '';
+        return; 
+    }
+    const qty = Number(document.getElementById('qty').value);
+    const type = document.getElementById('itemType').value;
+    const isRepay = document.getElementById('enableRepay').checked;
+
+    if (!code || isNaN(qty) || !cat) { 
+        alert("請完整填寫項目、數額與分類"); 
+        return; 
+    }
+
+    // 建立一個不變的「原始代碼」用於之後同步價格
+    let originalSymbol = code.toUpperCase().replace(".TW", "").trim();
+    let displaySymbol = code; 
+    let price = 1;
+    let currency = (cat === "美元活存" || cat === "美股") ? "USD" : "TWD";
+
+    if (type === "auto") {
+        document.getElementById('status').innerText = `🔍 正在同步 ${originalSymbol} 報價...`;
+        const fetchedPrice = await getPrice(originalSymbol);
+        if (fetchedPrice) { 
+            price = fetchedPrice; 
+            document.getElementById('status').innerText = `✅ 已成功加入 ${originalSymbol}`;
+        } else { 
+            price = Number(prompt(`抓不到價格，請手動輸入目前價格：`, 0)) || 0; 
+            document.getElementById('status').innerText = `⚠️ 手動輸入 ${originalSymbol} 價格`;
+        }
+    }
+    
+    // 建立物件
+    const item = { 
+        symbol: displaySymbol, 
+        originalSymbol: originalSymbol, 
+        qty: qty, 
+        price: price, 
+        currency: currency, 
+        type: type, 
+        category: cat,
+        date: new Date().toISOString()
+    };
+
+    // 處理還款邏輯
+    if (isRepay) {
+        item.repayDay = Number(document.getElementById('repayDay').value) || 0;
+        item.repayAmount = Number(document.getElementById('repayAmount').value) || 0;
+} else {
+        // 🟢 修正：如果沒有勾選「每月固定」，代表這是你當下「手動新增的單筆收支」
+        if (cat === '支出' || cat === '收入') {
+            // 在你的資產內，尋找名稱叫「台幣現金」的項目
+            let cashAccount = assets.find(a => a.symbol === '台幣現金' || a.originalSymbol === '台幣現金');
+            if (cashAccount) {
+                // 🟢 配合你的習慣：因為你手動輸入負數（例如 -500），加上負數（+=）就會自動變成扣除
+                cashAccount.qty += qty; 
+                console.log(`[手動單筆連動] 已從台幣現金變動金額: ${qty}`);
+           }
+        }
+    }
+
+    assets.push(item);
+    saveAndRefresh();
+
+    // 清空輸入欄位
+    document.getElementById('code').value = ''; 
+    document.getElementById('qty').value = '';
+    document.getElementById('repayDay').value = '';
+    document.getElementById('repayAmount').value = '';
+    document.getElementById('enableRepay').checked = false;
+    document.getElementById('debtFields').style.display = 'none';
+}
+
+// --- 眼睛圖示切換邏輯 ---
+function toggleHide() {
+    if (!isVerified && isHidden) {
+        pwdMode = "unlockEye"; 
+        showPwdModal(); // 改為呼叫鍵盤
+    } else {
+        executeToggleHide();
+    }
+}
+
+function executeToggleHide() {
+    isHidden = !isHidden;
+    const btn = document.getElementById('hideBtn');
+    if (btn) {
+        btn.innerHTML = isHidden ? 
+            `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>` : 
+            `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+    }
+    refresh();
+}
+
+function toggleSortMode() {
+    isSorting = !isSorting;
+    const btn = document.querySelector('.sort-btn:not(#hideBtn)');
+    
+    if (isSorting) {
+        btn.innerText = "✅ 完成";
+        btn.style.background = "#3a3a3c"; // 變完成提醒用戶正在編輯
+        btn.style.borderColor = "transparent";
+    } else {
+        btn.innerText = "⇅ 排序";
+        btn.style.background = "rgba(255, 255, 255, 0.1)"; // 恢復半透明
+        btn.style.borderColor = "rgba(255, 255, 255, 0.2)";
+    }
+    
+    refresh();
+}
+    function moveCat(idx, dir) {
+        const target = idx + dir;
+        if (target < 0 || target >= categories.length) return;
+        [categories[idx], categories[target]] = [categories[target], categories[idx]];
+        localStorage.setItem('percento_cat_order', JSON.stringify(categories));
+        initCategorySelect(); refresh();
+    }
+
+async function saveAndRefresh() {
+    // 1. 先存本地
+    localStorage.setItem('percento_dark_data', JSON.stringify(assets));
+    localStorage.setItem('percento_hidden_cats', JSON.stringify(hiddenCategories));
+
+    refresh();
+
+    const status = document.getElementById('status');
+    status.innerText = "☁️ 雲端備份中...";
+    try {
+        await fetch(YOUR_SCRIPT_URL, {
+            method: "POST",
+            mode: 'no-cors',
+            headers: { "Content-Type": "application/json" },
+            // 🔴 關鍵：把 hiddenCats 一併打包上傳
+            body: JSON.stringify({ 
+                action: "saveAllData", 
+                assets: assets,
+                hiddenCats: hiddenCategories 
+            })
+        });
+        status.innerText = "✅ 已備份至雲端";
+    } catch(e) {
+        status.innerText = "⚠️ 備份失敗";
+    }
+}
+
+function refresh() {
+        const container = document.getElementById('categoryList');
+        container.innerHTML = '';
+        currentTotal = 0;
+        
+        // --- 時間顯示邏輯 ---
+        const now = new Date();
+        const curDay = now.getDate(); // 統一從 now 取得日期
+        const curMonth = now.getMonth() + 1;
+        const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+        
+        const display = document.getElementById('todayDisplay');
+        if (display) {
+            display.innerText = `更新時間 ${now.getMonth() + 1}/${curDay} ${timeString}`;
+        }
+        // ------------------
+
+        const groups = {};
+categories.forEach(c => groups[c] = { sum: 0, items: [] });
+
+
+// 第一步：先建立所有項目的基礎數據，並找到「台幣現金」物件
+    let twdCashItem = null;
+    const tempProcessedItems = assets.map((a, i) => {
+        if (hiddenCategories.includes(a.category)) return null;
+        
+        let finalQty = a.qty;
+        const val = a.currency === 'USD' ? (a.price * finalQty * usdToTwd) : (a.price * finalQty);
+        
+        // 建立初始顯示物件
+        const itemObj = { ...a, displayQty: finalQty, val: val, displayVal: val, i };
+
+        // 鎖定現金項目 (請確保您新增時名稱完全等於 "台幣現金")
+        if (a.symbol === '台幣現金' || a.originalSymbol === '台幣現金') {
+            twdCashItem = itemObj;
+        }
+        return itemObj;
+    }).filter(x => x !== null);
+
+// 第二步：處理收入/支出的連動 (每到設定日期，自動入帳/扣款至台幣現金)
+let needsSave = false;
+const currentYearMonth = `${now.getFullYear()}-${curMonth}`; // 建立今年當月的標籤，例如 "2026-5"
+
+assets.forEach((item, idx) => {
+    // 檢查這是不是有設定「還款日/入帳日」的收入或支出項目
+    if ((item.category === '支出' || item.category === '收入') && item.repayDay && item.repayDay !== 0) {
+        
+        // 條件 1：今天的日期已經大於或等於設定的入帳日
+        const isTimeUp = (curDay >= item.repayDay);
+        
+        // 條件 2：這個月這個項目還沒有被執行過入帳
+        const notProcessedThisMonth = (item.lastProcessedMonth !== currentYearMonth);
+
+        if (isTimeUp && notProcessedThisMonth) {
+            if (twdCashItem) {
+                // 取得要變動的金額：優先使用修改過的固定扣款金額 repayAmount，若無則使用 qty
+                const baseAmount = item.repayAmount || item.qty || 0;
+                const val = item.currency === 'USD' ? (item.price * baseAmount * usdToTwd) : (item.price * baseAmount);
+                
+                // 執行變動（支出項目在輸入時若為負數，這裡加算 val 就會自然變成扣款）
+                assets[twdCashItem.i].qty += val;
+                
+                // 🔴 關鍵核心：標記「今年當月」已處理，這樣這個月內就算天天打開網頁，也絕不會重複扣款/入帳
+                assets[idx].lastProcessedMonth = currentYearMonth;
+                assets[idx].isProcessed = true; // 相容舊版標記
+                needsSave = true;
+                
+                console.log(`[自動入帳成功] 項目: ${item.symbol}, 金額: ${val}, 已計入台幣現金。`);
+            }
+        }
+    }
+});
+
+// 如果數據有變動，存檔並跳出，讓 saveAndRefresh 重新觸發一次乾淨的 refresh
+if (needsSave) {
+    saveAndRefresh();
+    return; 
+}
+
+// --- 第三步：🔴 準備渲染資料 (修復 finalProcessedItems 未定義報錯) ---
+    const finalProcessedItems = assets.map((a, i) => {
+        if (hiddenCategories.includes(a.category)) return null;
+        
+        const val = a.currency === 'USD' ? (a.price * a.qty * usdToTwd) : (a.price * a.qty);
+        
+        // 🟢 修正後的過濾邏輯：
+        // 只有在「同時是收支項目」且「沒有設定固定扣款/入帳日」且「不是本月建立」的情況下，才予以隱藏。
+        // 有設定 repayDay 的固定項目在新月份會被安全保留。
+        const itemDate = a.date ? new Date(a.date) : now;
+        const isIncomeOrExpense = (a.category === '支出' || a.category === '收入');
+        const isFixedItem = (a.repayDay && a.repayDay !== 0);
+        const isNotCurrentMonth = (itemDate.getMonth() + 1 !== curMonth);
+
+        if (isIncomeOrExpense && !isFixedItem && isNotCurrentMonth) {
+            return null;
+        }
+
+        return { ...a, displayVal: val, i };
+    }).filter(x => x !== null);
+
+// --- 🔴 新增：在此優先計算正確的 currentTotal (分母) ---
+    // 確保在跑渲染循環前，currentTotal 已經是排除收支後的「純資產總額」
+    currentTotal = finalProcessedItems.reduce((acc, item) => {
+        if (item.category !== '收入' && item.category !== '支出') {
+            return acc + item.displayVal;
+        }
+        return acc;
+    }, 0);
+
+    // 第四步：依照分類進行渲染
+    categories.forEach((name, idx) => {
+        const g = groups[name];
+        g.items = finalProcessedItems.filter(item => item.category === name);
+
+        if (!isSorting && g.items.length === 0) return;
+
+        g.sum = g.items.reduce((s, i) => s + i.displayVal, 0);
+
+let displayPerc = "";
+        if (currentTotal > 0) {
+            // 計算佔比
+            const perc = ((g.sum / currentTotal) * 100).toFixed(1);
+
+        if (name !== '收入' && name !== '支出'){
+
+displayPerc = `<span style="font-size:0.8rem; color:var(--subtext); font-weight:400;">(${perc}%)</span>`; 
+            } else {
+                // 正常的資產項，顯示大字百分比，確保這些加總為 100%
+                displayPerc = `${perc}%`;
+            }
+        }
+
+let displayName = name;
+        if (name === '收入') {
+            displayName = '💰 收入'; // 您可以自行修改這裏的文字
+        } else if (name === '支出') {
+            displayName = '💸 支出'; // 也可以順便改支出
+        }
+
+    // 渲染 HTML (注意：內部的金額顯示要改用 item.displayVal)
+container.innerHTML += `
+    <div class="category-group">
+        <div class="category-header" onclick="if(!isSorting) this.parentElement.classList.toggle('open')">
+            <div style="display:flex; align-items:baseline; gap:8px;">
+                <!-- 🔴 分類名稱 -->
+                <span style="font-weight:600">${displayName}</span>
+                <!-- 🔴 百分比：跟在名稱後面，縮小並變灰 -->
+                <span style="font-size:0.75rem; color:var(--subtext); font-weight:400;">${displayPerc}</span>
+            </div>
+            
+            <div style="margin-left:auto; display:flex; align-items:center; gap:10px;">
+                ${isSorting ? `
+                    <button class="sort-btn" style="position:static" onclick="event.stopPropagation(); moveCat(${idx},-1)">↑</button>
+                    <button class="sort-btn" style="position:static" onclick="event.stopPropagation(); moveCat(${idx},1)">↓</button>
+                ` : `
+                    <!-- 🔴 右側金額：保持原本的大字體 -->
+                    <span style="font-weight:700; color:${g.sum < 0 ? 'var(--negative)' : 'var(--primary)'}">
+                        ${isHidden ? '****' : '$' + Math.round(g.sum).toLocaleString()}
+                    </span>
+                `}
+            </div>
+        </div>
+        <div class="category-content">
+
+${g.items.map(item => {
+    // 取得今天的日期 (1-31)
+    const today = new Date().getDate();
+    const itemIdx = item.i;
+
+    // 只有當 item 有設定 repayDay 且不為 0 時，才啟用還款標籤邏輯
+    const hasRepaySetting = !!(item.repayDay && item.repayDay !== 0);
+    // 重新定義顯示日期，避免 template 找不到變數
+    const displayDay = item.repayDay;
+
+    // 自動判斷：分類是貸款/其他，且今天日期 >= 設定的扣款日
+    const isTargetCat = ['貸款', '其他', '收入', '支出'].includes(item.category);
+
+    const showRepaid = hasRepaySetting && isTargetCat && today >= item.repayDay;
+    const showPending = hasRepaySetting && isTargetCat && today < item.repayDay;
+
+// 判斷是否為收入項目，用來切換文字
+const isIncomeItem = item.category === '收入';
+// 取得要顯示的固定金額 (1667)，若無則顯示 item.qty
+const fixAmt = (item.repayAmount || item.qty || 0).toLocaleString();
+const finalDay = item.repayDay || 0;
+
+    return `
+    <div class="detail-item">
+        <div style="flex: 1;">
+
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom: 4px;">
+                <b style="cursor:pointer;" onclick="const n=prompt('修改名稱', '${item.symbol}'); if(n){assets[${item.i}].symbol=n; saveAndRefresh();}">${item.symbol}</b>
+                <span style="cursor:pointer; font-size:0.65rem; color:var(--subtext); background:rgba(255,255,255,0.05); border:1px solid #444; padding:2px 6px; border-radius:4px;" 
+                      onclick="changeItemCategory(${item.i})">變更分類 ❯</span>
+            </div>
+
+            <div class="qty-badge" style="cursor:pointer; margin-bottom: 4px;" onclick="const q=prompt('修改數量/金額', '${item.qty}'); if(q!==null){assets[${itemIdx}].qty=Number(q); saveAndRefresh();}">
+
+    ${Math.round(item.qty || 0).toLocaleString()} ${item.category.includes('股')?'股':(item.currency==='USD'?'美元':'台幣')} ✎
+</div>
+            
+            ${item.type === 'auto' ? `
+                <div style="display: block;">
+                    <div class="price-tag ${item.currency === 'USD' ? 'price-tag-usd' : ''}" style="display: inline-block; width: auto;">
+                        ${item.currency === 'USD' ? 'USD' : 'TWD'} ${item.price.toFixed(2)} 
+                        ${item.originalSymbol && item.originalSymbol !== item.symbol ? `(${item.originalSymbol})` : ''}
+                    </div>
+                </div>` : ''}
+
+                ${showRepaid ? `
+                <div style="margin-top:4px;">
+                    <span class="price-tag" onclick="editRepayDay(${itemIdx})" style="background:rgba(50,215,75,0.1); color:#81c784; border:none; padding:2px 8px; cursor:pointer;">
+                        ${isIncomeItem ? '✅ 本月已入帳' : '✅ 本月已還款'} (入帳日: ${finalDay}號) ✎
+                    </span>
+                </div>
+            ` : showPending ? `
+                <div style="margin-top:4px;">
+                    <span class="price-tag" onclick="editRepayDay(${itemIdx})" style="background:rgba(255,255,255,0.05); color:#999; border:none; padding:2px 8px; cursor:pointer;">
+                        ${isIncomeItem ? '⏳ 預計入帳' : '⏳ 未到還款日'} (入帳日: ${finalDay}號) ✎
+                    </span>
+                </div>
+            ` : ''}
+        </div>
+
+        <div style="text-align:right; display: flex; flex-direction: column; justify-content: center;">
+            <div style="font-weight:700; font-size: 1.1rem; color:${item.displayVal < 0 ? 'var(--negative)' : 'white'}">
+                ${isHidden ? '****' : '$' + Math.round(item.displayVal || 0).toLocaleString()}
+            </div>
+            <span class="remove-link" style="cursor:pointer;" onclick="if(confirm('確定移除？')){assets.splice(${itemIdx},1); saveAndRefresh();}">移除</span>
+        </div>
+    </div>`;
+}).join('')}
+
+                    </div>
+                </div>`;
+        });
+        updateChart(groups);
+    }
+
+    function updateChart(groups) {
+        const ctx = document.getElementById('assetChart').getContext('2d');
+        const legend = document.getElementById('chartLegend'); legend.innerHTML = '';
+        if (chart) chart.destroy();
+        const labels = [], data = [], bg = [];
+
+        let assetOnlyTotal = 0; 
+        categories.forEach(c => {
+            if (c !== '收入' && c !== '支出') {
+                assetOnlyTotal += Math.abs(groups[c].sum);
+            }
+        });
+
+        categories.forEach((cat, i) => {
+            if (groups[cat].sum !== 0) {
+                const val = Math.abs(groups[cat].sum);
+                const color = COLORS[i % COLORS.length];
+
+                // --- 🔵 修改處 2：過濾圓餅圖顯示 ---
+                // 只有「非收支」項目會被 push 進 data，確保圓餅圖加總永遠是 100% 資產
+                if (cat !== '收入' && cat !== '支出') {
+                    labels.push(cat); 
+                    data.push(val); 
+                    bg.push(color);
+                }
+
+                // --- 🔵 修改處 3：百分比顯示邏輯 ---
+                let displayPerc = "";
+                if (assetOnlyTotal > 0) {
+                    // 不管是資產還是收支，統一除以「純資產總額」
+                    // 這樣「收支」就會顯示它相對於你總資產的占比（例如 2%）
+                    const p = ((val / assetOnlyTotal) * 100).toFixed(1);
+                    displayPerc = `${p}%`;
+                }
+
+                legend.innerHTML += `
+                    <div class="legend-item">
+                        <div style="display:flex; align-items:center">
+                            <div class="color-dot" style="background:${color}"></div>
+                            ${cat}
+                        </div>
+                        <div style="${(cat === '收入' || cat === '支出') ? 'color: var(--subtext);' : ''}">
+                            ${displayPerc}
+                        </div>
+                    </div>`;
+            }
+        });
+
+        chart = new Chart(ctx, {
+type: 'doughnut',
+    data: { 
+        labels: labels, // 補回標籤，Tooltip 才能顯示名稱
+        datasets: [{ 
+            data, 
+            backgroundColor: bg, 
+            borderWidth: 2, // 稍微增加邊框感
+            borderColor: 'var(--card)', // 邊框顏色與背景一致
+            hoverOffset: 15 // 關鍵：滑鼠靠近時彈出的距離
+        }]
+    },
+    options: { 
+responsive: true,
+    maintainAspectRatio: false,
+    layout: {
+        padding: 15 // 🔴 加入這行，給圓餅圖留 15px 的呼吸空間
+    },
+        cutout: '75%', // 稍微調細一點點，放大效果更明顯
+        plugins: { 
+            legend: { display: false }, // 依然隱藏上方預設圖例，使用我們自製的
+            tooltip: {
+                enabled: true, // 開啟提示框
+                backgroundColor: 'rgba(28, 28, 30, 0.9)', // 深色背景
+                titleFont: { size: 14 },
+                bodyFont: { size: 14 },
+                padding: 12,
+                cornerRadius: 10,
+                displayColors: true, // 顯示顏色小點
+    position: 'nearest', 
+    yAlign: 'bottom',
+    external: null, 
+    callbacks: {
+        label: function(context) {
+            let label = context.label || '';
+            let value = context.parsed || 0;
+if (isHidden) {
+                    return ` ${label}: $****`; 
+                }
+            let percent = ((value / assetOnlyTotal) * 100).toFixed(1);
+            return ` ${label}: $${Math.round(value).toLocaleString()} (${percent}%)`;
+}
+                        }
+                    }
+                },
+                // 🔴 確保互動模式正確
+                hover: { mode: 'nearest', intersect: true },
+                animation: { duration: 400 }
+            }
+        });
+    }
+
+    // 啟動初始化
+window.onload = async () => {
+    document.addEventListener("touchstart", function() {}, true);// 🔴 加入這一行，強制啟動手機版的點擊回饋
+    isHidden = true;
+    isVerified = false;
+    const btn = document.getElementById('hideBtn');
+    if(btn) {
+        btn.innerHTML = isHidden ? 
+            `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>` : 
+            `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+    }
+    initCategorySelect();
+    
+// 從雲端抓取所有數據 (資產 + 隱藏清單)
+    document.getElementById('status').innerText = "☁️ 正在從雲端同步設定...";
+    try {
+        // 🔴 這裡 action 改為 getAllData，一次抓回資產和隱藏設定
+        const res = await fetch(`${YOUR_SCRIPT_URL}?action=getAllData`);
+        const cloudData = await res.json();
+        
+        if (cloudData) {
+            // 同步資產
+            if (cloudData.assets && cloudData.assets.length > 0) {
+                assets = cloudData.assets;
+                localStorage.setItem('percento_dark_data', JSON.stringify(assets));
+            }
+            // 🔴 關鍵：同步隱藏分類清單
+            if (cloudData.hiddenCats) {
+                hiddenCategories = cloudData.hiddenCats;
+                localStorage.setItem('percento_hidden_cats', JSON.stringify(hiddenCategories));
+            }
+        }
+    } catch(e) {
+        console.log("雲端同步失敗，使用本地存檔");
+        // 失敗時，至少從本地讀取隱藏清單，避免手機端完全沒設定
+        const localHidden = localStorage.getItem('percento_hidden_cats');
+        if (localHidden) hiddenCategories = JSON.parse(localHidden);
+    }
+
+    // 原有的匯率同步
+    try {
+        const res = await fetch('https://open.er-api.com/v6/latest/USD');
+        const d = await res.json(); usdToTwd = d.rates.TWD;
+    } catch(e) {}
+    
+    document.getElementById('status').innerText = "✅ 同步完成";
+    refresh();
+};
+
+// 在 handleNewItem 函數末端加入
+document.getElementById('code').value = ''; 
+document.getElementById('qty').value = '';
+document.getElementById('repayDay').value = '';
+document.getElementById('repayAmount').value = '';
+document.getElementById('enableRepay').checked = false; // 重設滑塊開關
+document.getElementById('debtFields').style.display = 'none'; // 隱藏欄位
+
+function changeItemCategory(index) {
+    // 建立一個分類清單字串供使用者選擇
+    const catList = categories.map((c, i) => `${i + 1}. ${c}`).join('\n');
+    const choice = prompt(`請輸入數字選擇新分類：\n${catList}`, "");
+    
+    if (choice !== null) {
+        const num = parseInt(choice) - 1;
+        if (num >= 0 && num < categories.length) {
+            const newCat = categories[num];
+            // 關鍵：修改資產的分類
+            assets[index].category = newCat;
+            
+            // 關鍵：根據新分類自動調整幣別 (這很重要，否則美股轉台幣會計算錯誤)
+            assets[index].currency = (newCat === "美元活存" || newCat === "美股") ? "USD" : "TWD";
+            
+            saveAndRefresh();
+        } else {
+            alert("無效的選擇");
+        }
+    }
+}
+function editRepayDay(i) {
+    // 1. 修改處理日期 (例如 22 號)
+    const currentDay = assets[i].repayDay || 1;
+    const newDay = prompt('【1/2】修改每月固定扣款日期 (1-31):', currentDay);
+    
+    if (newDay !== null && newDay.trim() !== "") {
+        const dayNum = parseInt(newDay);
+        if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
+            assets[i].repayDay = dayNum;
+            
+            // 2. 修改您輸入的 (月固定金額)
+            // 如果您的資料還沒有 repayAmount 欄位，就先讀取 qty
+            const currentFixAmount = assets[i].repayAmount || assets[i].qty;
+            const newFixAmount = prompt('【2/2】修改每月固定扣款金額 (目前: ' + currentFixAmount + '):', currentFixAmount);
+            
+            if (newFixAmount !== null && newFixAmount.trim() !== "") {
+                const amtNum = Number(newFixAmount);
+                if (!isNaN(amtNum)) {
+                    // 🔴 關鍵點：修改的是 repayAmount，而不是總額 -3334
+                    assets[i].repayAmount = amtNum;
+                }
+            }
+            
+            saveAndRefresh(); 
+        } else {
+            alert('請輸入有效的日期數字 (1-31)');
+        }
+    }
+}
+    // 手機版載入補強機制
+    setTimeout(initCategorySelect, 500);
+
+function showPwdModal() {
+    currentInputPwd = "";
+    updateDots();
+    document.getElementById('pwdModal').style.display = 'flex';
+}
+
+function closePwdModal() {
+    document.getElementById('pwdModal').style.display = 'none';
+}
+
+function pressKey(num) {
+    if (currentInputPwd.length < 4) {
+        currentInputPwd += num;
+        updateDots();
+    }
+    
+    if (currentInputPwd.length === 4) {
+        setTimeout(() => {
+            if (pwdMode === "unlockEye") {
+                if (currentInputPwd === SET_PASSWORD) {
+                    isVerified = true;
+                    executeToggleHide();
+                    closePwdModal();
+                } else {
+                    authFailed();
+                }
+            } else if (pwdMode === "unhideCat") {
+                if (currentInputPwd === UNHIDE_PASSWORD) {
+                    hiddenCategories = hiddenCategories.filter(c => c !== pendingCat);
+                    localStorage.setItem('percento_hidden_cats', JSON.stringify(hiddenCategories));
+                    refresh();
+                    closePwdModal();
+                } else {
+                    authFailed();
+                }
+            }
+        }, 200);
+    }
+}
+
+function deleteKey() {
+    if (currentInputPwd.length > 0) {
+        currentInputPwd = currentInputPwd.slice(0, -1); // 刪除最後一位
+        updateDots(); // 更新圓點顯示
+    }
+}
+
+function authFailed() {
+    alert("密碼錯誤");
+    currentInputPwd = "";
+    updateDots();
+}
+
+function updateDots() {
+    const dots = document.querySelectorAll('#pwdDots div');
+    dots.forEach((dot, i) => {
+        if (i < currentInputPwd.length) {
+            dot.classList.add('dot-filled');
+        } else {
+            dot.classList.remove('dot-filled');
+        }
+    });
+}
+
+</script>
+<div id="pwdModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:9999; flex-direction:column; align-items:center; justify-content:center;">
+
+    <div style="margin-bottom:30px; font-size:1.2rem; color:var(--text);">請輸入驗證密碼</div>
+
+    <div id="pwdDots" style="display:flex; gap:15px; margin-bottom:40px;">
+
+        <div style="width:15px; height:15px; border-radius:50%; border:2px solid #fff;"></div>
+
+        <div style="width:15px; height:15px; border-radius:50%; border:2px solid #fff;"></div>
+
+        <div style="width:15px; height:15px; border-radius:50%; border:2px solid #fff;"></div>
+
+        <div style="width:15px; height:15px; border-radius:50%; border:2px solid #fff;"></div>
+
+    </div>
+
+    <div style="display:grid; grid-template-columns: repeat(3, 80px); gap:20px;">
+
+        <button class="num-key" onclick="pressKey('1')">1</button>
+
+        <button class="num-key" onclick="pressKey('2')">2</button>
+
+        <button class="num-key" onclick="pressKey('3')">3</button>
+
+        <button class="num-key" onclick="pressKey('4')">4</button>
+
+        <button class="num-key" onclick="pressKey('5')">5</button>
+
+        <button class="num-key" onclick="pressKey('6')">6</button>
+
+        <button class="num-key" onclick="pressKey('7')">7</button>
+
+        <button class="num-key" onclick="pressKey('8')">8</button>
+
+<button class="num-key" onclick="pressKey('9')">9</button>
+    
+    <button class="num-key" style="font-size:1.2rem;" onclick="deleteKey()">⌫</button>
+    
+    <button class="num-key" onclick="pressKey('0')">0</button>
+    <button class="num-key" style="font-size:1rem; background:transparent;" onclick="closePwdModal()">取消</button>
+</div>
+
+</div>
+
+
+</body>
+</html>
