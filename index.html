@@ -282,7 +282,7 @@ const SET_PASSWORD = "5257";    // 眼睛切換密碼
 const UNHIDE_PASSWORD = "5757"; // 開啟隱藏分類密碼
 
     // 你的 Google Apps Script URL
-    const YOUR_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbymGrkXe24-JaWEvT6lYMQBaBsyYTy5_lAiDfIxAORQ_yYqoCfYxgRLgXCjR0BETyqC/exec";
+    const YOUR_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzYZxjsem3czmupxLxylHOnA53EBXeTY9lEkWWPSzw_xO6rNVKmAPV9WmJ7eENWQ6xy/exec";
     
 // 1. 先讀取舊有的排序
 let savedCats = JSON.parse(localStorage.getItem('percento_cat_order')) || [];
@@ -534,8 +534,8 @@ async function saveAndRefresh() {
     try {
         await fetch(YOUR_SCRIPT_URL, {
             method: "POST",
-            mode: 'no-cors',
-            headers: { "Content-Type": "application/json" },
+            mode: 'cors',
+            headers: { "Content-Type": "text/plain" }, // 🔴 改為 text/plain 完美避開 Apps Script 的 CORS 限制
             // 🔴 關鍵：把 hiddenCats 一併打包上傳
             body: JSON.stringify({ 
                 action: "saveAllData", 
@@ -590,7 +590,7 @@ categories.forEach(c => groups[c] = { sum: 0, items: [] });
 
 // 第二步：處理收入/支出的連動 (每到設定日期，自動入帳/扣款至台幣現金)
 let needsSave = false;
-const currentYearMonth = `${now.getFullYear()}-${curMonth}`; // 建立今年當月的標籤，例如 "2026-5"
+const currentYearMonth = `${now.getFullYear()}-${curMonth.toString().padStart(2, '0')}`; // 建立今年當月的標籤，例如 "2026-05"
 
 assets.forEach((item, idx) => {
     // 檢查這是不是有設定「還款日/入帳日」的收入或支出項目
