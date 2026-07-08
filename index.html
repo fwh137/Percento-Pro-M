@@ -268,6 +268,9 @@ input:not([type="checkbox"]), select {
 <div id="debtFields" style="display:none; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 14px; margin-top: 5px; margin-bottom: 5px;">
     <input type="number" id="repayDay" placeholder="還款日(1-31)">
     <input type="number" id="repayAmount" placeholder="還款金額">
+    <input type="number" id="interestRate" placeholder="貸款年利率 (%) 例如: 2.1" step="0.01">
+    <input type="number" id="totalPeriods" placeholder="貸款總期數 例如: 84">
+    <input type="number" id="paidPeriods" placeholder="目前已還期數 例如: 14">
 </div>
         
         <button class="btn-primary" onclick="handleNewItem()">確認加入並同步</button>
@@ -452,7 +455,10 @@ if (code === "開啟") {
     if (isRepay) {
         item.repayDay = Number(document.getElementById('repayDay').value) || 0;
         item.repayAmount = Number(document.getElementById('repayAmount').value) || 0;
-} else {
+        item.interestRate = parseFloat(document.getElementById('interestRate').value) || 0;
+        item.totalPeriods = parseInt(document.getElementById('totalPeriods').value) || 0;
+        item.paidPeriods = parseInt(document.getElementById('paidPeriods').value) || 0;
+  } else {
         // 🟢 修正：如果沒有勾選「每月固定」，代表這是你當下「手動新增的單筆收支」
         if (cat === '支出' || cat === '收入') {
             // 在你的資產內，尋找名稱叫「台幣現金」的項目
@@ -473,6 +479,10 @@ if (code === "開啟") {
     document.getElementById('qty').value = '';
     document.getElementById('repayDay').value = '';
     document.getElementById('repayAmount').value = '';
+    document.getElementById('repayAmount').value = '';
+    document.getElementById('interestRate').value = '';
+    document.getElementById('totalPeriods').value = '';
+    document.getElementById('paidPeriods').value = '';
     document.getElementById('enableRepay').checked = false;
     document.getElementById('debtFields').style.display = 'none';
 }
