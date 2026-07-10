@@ -28,9 +28,9 @@
     background: rgba(255, 255, 255, 0.1); /* 半透明玻璃質感 */
     color: var(--text);
     border: 1px solid rgba(255, 255, 255, 0.2); /* 纖細的邊框 */
-    display: flex;          /* 🔴 新增：開啟彈性佈局 */
-    align-items: center;    /* 🔴 新增：垂直置中 */
-    justify-content: center;/* 🔴 新增：水平置中 */
+    display: flex;          /* 開啟彈性佈局 */
+    align-items: center;    /* 垂直置中 */
+    justify-content: center;/* 水平置中 */
     padding: 6px 14px;
     border-radius: 10px;
     font-size: 0.8rem;
@@ -130,7 +130,7 @@ input:not([type="checkbox"]), select {
 
 /* 點擊時的視覺回饋：稍微放大 + 變亮 */
 .num-key:active {
-    transform: scale(1.2) !important; /* 🔴 關鍵：放大 1.2 倍 */
+    transform: scale(1.2) !important; /* 關鍵：放大 1.2 倍 */
     background-color: rgba(255, 255, 255, 0.4) !important; /* 變亮 */
     box-shadow: 0 0 15px rgba(255, 255, 255, 0.2); /* 增加一點點光暈感 */
     transition: transform 0.02s ease-out !important; /* 點下去要快，回彈稍微慢一點 */
@@ -154,7 +154,7 @@ input:not([type="checkbox"]), select {
     100% { transform: scale(1); }
 }
 
-/* --- 🔴 強制修正：讓 Checkbox 變身 iOS 滑塊 --- */
+/* --- 讓 Checkbox 變身 iOS 滑塊 --- */
 .check-row {
     display: flex !important;
     align-items: center !important;
@@ -212,7 +212,7 @@ input:not([type="checkbox"]), select {
     font-size: 0.95rem;
 }
 
-/* 🔴 新增：美股（USD）專用的藍色標籤樣式 */
+/* 美股（USD）專用的藍色標籤樣式 */
 .price-tag-usd {
     /* 調整為更像圖片中的暗藍色背景 */
     background: rgba(10, 132, 255, 0.2) !important; 
@@ -337,7 +337,12 @@ const text = isHidden ? '$***,***' : '$' + Math.round(currentTotal).toLocaleStri
     }
 
     async function getPrice(symbol) {
-        const clean = symbol.toUpperCase().replace(".TW", "").trim();
+        let clean = symbol.toUpperCase().trim();
+    // Google 財經不吃 .TW，強制鎖定台股的正確寫法是「TPE:」字首！
+    // 只要開頭是數字，且還沒有設定過交易所字首的，一律在前面加上 "TPE:"
+    if (/^\d/.test(clean) && !clean.includes(':')) {
+        clean = 'TPE:' + clean;
+    }
         try {
             const res = await fetch(`${YOUR_SCRIPT_URL}?symbol=${encodeURIComponent(clean)}&t=${Date.now()}`);
             const data = await res.json();
@@ -345,9 +350,9 @@ const text = isHidden ? '$***,***' : '$' + Math.round(currentTotal).toLocaleStri
         } catch (e) { return null; }
     }
 
-// 🔴 修改：加入 targetCurrency 參數，接收來自按鈕的 'TWD' 或 'USD'
+// 加入 targetCurrency 參數，接收來自按鈕的 'TWD' 或 'USD'
 async function updatePrices(targetCurrency) {
-    // 🔴 確保獲取當前點擊的按鈕（這行非常重要，否則會報 btn is not defined）
+    // 確保獲取當前點擊的按鈕（這行非常重要，否則會報 btn is not defined）
     const btn = event.currentTarget;
     const originalText = btn.innerText;
     
@@ -363,10 +368,11 @@ async function updatePrices(targetCurrency) {
         console.log("匯率更新失敗"); 
     }
 
-    // 🔴 迴圈更新價格
+    // 迴圈更新價格
     for (let i = 0; i < assets.length; i++) {
         // 必須同時滿足「自動更新」且「幣別相符」才抓取
-        if (assets[i].type === 'auto' && assets[i].currency === targetCurrency) {
+        // 分類如果是「定期定額」，就跳過不自動刷股票公式，防止重複計算入帳
+        if (assets[i].type === 'auto' && assets[i].currency === targetCurrency && assets[i].category !== '定期定額') {
             const queryTarget = assets[i].originalSymbol || assets[i].symbol;
 
             const latestPrice = await getPrice(queryTarget);
@@ -374,9 +380,9 @@ async function updatePrices(targetCurrency) {
                 assets[i].price = latestPrice;
             }
         }
-    } // <--- 🔴 這是 for 迴圈的結束
+    } // <--- 這是 for 迴圈的結束
 
-    // 🔴 以下動作在迴圈結束後只會執行一次
+    // 以下動作在迴圈結束後只會執行一次
     saveAndRefresh(); 
     btn.disabled = false; 
     btn.innerText = originalText; // 恢復原本按鈕文字
@@ -391,7 +397,7 @@ async function handleNewItem() {
     
     if (!code || !cat) { alert("請填寫名稱與選擇分類"); return; }
 
-    // --- 🔴 隱藏指令檢查 ---
+    // --- 隱藏指令檢查 ---
     if (code === "隱藏") {
     if (!cat) { alert("請選擇要隱藏的分類"); return; }
     if (!hiddenCategories.includes(cat)) {
@@ -459,12 +465,12 @@ if (code === "開啟") {
         item.totalPeriods = parseInt(document.getElementById('totalPeriods').value) || 0;
         item.paidPeriods = parseInt(document.getElementById('paidPeriods').value) || 0;
   } else {
-        // 🟢 修正：如果沒有勾選「每月固定」，代表這是你當下「手動新增的單筆收支」
+        // 如果沒有勾選「每月固定」，代表這是你當下「手動新增的單筆收支」
         if (cat === '支出' || cat === '收入') {
             // 在你的資產內，尋找名稱叫「台幣現金」的項目
             let cashAccount = assets.find(a => a.symbol === '台幣現金' || a.originalSymbol === '台幣現金');
             if (cashAccount) {
-                // 🟢 配合你的習慣：因為你手動輸入負數（例如 -500），加上負數（+=）就會自動變成扣除
+                // 配合你的習慣：因為你手動輸入負數（例如 -500），加上負數（+=）就會自動變成扣除
                 cashAccount.qty += qty; 
                 console.log(`[手動單筆連動] 已從台幣現金變動金額: ${qty}`);
            }
@@ -545,8 +551,8 @@ async function saveAndRefresh() {
         await fetch(YOUR_SCRIPT_URL, {
             method: "POST",
             mode: 'cors',
-            headers: { "Content-Type": "text/plain" }, // 🔴 改為 text/plain 完美避開 Apps Script 的 CORS 限制
-            // 🔴 關鍵：把 hiddenCats 一併打包上傳
+            headers: { "Content-Type": "text/plain" }, // 改為 text/plain 完美避開 Apps Script 的 CORS 限制
+            // 把 hiddenCats 一併打包上傳
             body: JSON.stringify({ 
                 action: "saveAllData", 
                 assets: assets,
@@ -617,11 +623,6 @@ assets.forEach((item, idx) => {
                 const fixedAmount = Number(item.repayAmount) || 0;
                 let queryTarget = item.originalSymbol || item.symbol;
 
-                // 如果是純數字（例: 0050），強制補上 .TW 傳給 getPrice，防止港股干擾
-                if (/^\d+$/.test(queryTarget)) {
-                    queryTarget = queryTarget + '.TW';
-                }
-                
                 console.log(`[定期定額觸發] 項目: ${item.symbol}，發送台股代碼: ${queryTarget}`);
 
                 getPrice(queryTarget).then(latestPrice => {
@@ -702,13 +703,12 @@ if (needsSave) {
     return; 
 }
 
-// --- 第三步：🔴 準備渲染資料 (修復 finalProcessedItems 未定義報錯) ---
+// --- 第三步：準備渲染資料 (修復 finalProcessedItems 未定義報錯) ---
     const finalProcessedItems = assets.map((a, i) => {
         if (hiddenCategories.includes(a.category)) return null;
         
         const val = a.currency === 'USD' ? (a.price * a.qty * usdToTwd) : (a.price * a.qty);
         
-        // 🟢 修正後的過濾邏輯：
         // 只有在「同時是收支項目」且「沒有設定固定扣款/入帳日」且「不是本月建立」的情況下，才予以隱藏。
         // 有設定 repayDay 的固定項目在新月份會被安全保留。
         const itemDate = a.date ? new Date(a.date) : now;
@@ -723,7 +723,7 @@ if (needsSave) {
         return { ...a, displayVal: val, i };
     }).filter(x => x !== null);
 
-// --- 🔴 新增：在此優先計算正確的 currentTotal (分母) ---
+// --- 在此優先計算正確的 currentTotal (分母) ---
     // 確保在跑渲染循環前，currentTotal 已經是排除收支後的「純資產總額」
     currentTotal = finalProcessedItems.reduce((acc, item) => {
         if (item.category !== '收入' && item.category !== '支出') {
@@ -883,7 +883,7 @@ const finalDay = item.repayDay || 0;
                 const val = Math.abs(groups[cat].sum);
                 const color = COLORS[i % COLORS.length];
 
-                // --- 🔵 修改處 2：過濾圓餅圖顯示 ---
+                // --- 過濾圓餅圖顯示 ---
                 // 只有「非收支」項目會被 push 進 data，確保圓餅圖加總永遠是 100% 資產
                 if (cat !== '收入' && cat !== '支出') {
                     labels.push(cat); 
@@ -891,7 +891,7 @@ const finalDay = item.repayDay || 0;
                     bg.push(color);
                 }
 
-                // --- 🔵 修改處 3：百分比顯示邏輯 ---
+                // --- 百分比顯示邏輯 ---
                 let displayPerc = "";
                 if (assetOnlyTotal > 0) {
                     // 不管是資產還是收支，統一除以「純資產總額」
@@ -929,7 +929,7 @@ type: 'doughnut',
 responsive: true,
     maintainAspectRatio: false,
     layout: {
-        padding: 15 // 🔴 加入這行，給圓餅圖留 15px 的呼吸空間
+        padding: 15 //給圓餅圖留 15px 的呼吸空間
     },
         cutout: '75%', // 稍微調細一點點，放大效果更明顯
         plugins: { 
@@ -958,7 +958,7 @@ if (isHidden) {
                         }
                     }
                 },
-                // 🔴 確保互動模式正確
+                // 確保互動模式正確
                 hover: { mode: 'nearest', intersect: true },
                 animation: { duration: 400 }
             }
@@ -967,7 +967,7 @@ if (isHidden) {
 
     // 啟動初始化
 window.onload = async () => {
-    document.addEventListener("touchstart", function() {}, true);// 🔴 加入這一行，強制啟動手機版的點擊回饋
+    document.addEventListener("touchstart", function() {}, true);// 強制啟動手機版的點擊回饋
     isHidden = true;
     isVerified = false;
     const btn = document.getElementById('hideBtn');
@@ -981,7 +981,7 @@ window.onload = async () => {
 // 從雲端抓取所有數據 (資產 + 隱藏清單)
     document.getElementById('status').innerText = "☁️ 正在從雲端同步設定...";
     try {
-        // 🔴 這裡 action 改為 getAllData，一次抓回資產和隱藏設定
+        // 這裡 action 改為 getAllData，一次抓回資產和隱藏設定
         const res = await fetch(`${YOUR_SCRIPT_URL}?action=getAllData`);
         const cloudData = await res.json();
         
@@ -991,7 +991,7 @@ window.onload = async () => {
                 assets = cloudData.assets;
                 localStorage.setItem('percento_dark_data', JSON.stringify(assets));
             }
-            // 🔴 關鍵：同步隱藏分類清單
+            // 同步隱藏分類清單
             if (cloudData.hiddenCats) {
                 hiddenCategories = cloudData.hiddenCats;
                 localStorage.setItem('percento_hidden_cats', JSON.stringify(hiddenCategories));
@@ -1064,7 +1064,7 @@ function editRepayDay(i) {
             if (newFixAmount !== null && newFixAmount.trim() !== "") {
                 const amtNum = Number(newFixAmount);
                 if (!isNaN(amtNum)) {
-                    // 🔴 關鍵點：修改的是 repayAmount，而不是總額 -3334
+                    // 修改的是 repayAmount，而不是總額 -3334
                     assets[i].repayAmount = amtNum;
                 }
             }
