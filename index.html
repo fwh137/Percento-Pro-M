@@ -565,7 +565,7 @@ async function saveAndRefresh() {
     }
 }
 
-function refresh() {
+async function refresh() {
         const container = document.getElementById('categoryList');
         container.innerHTML = '';
         currentTotal = 0;
@@ -606,96 +606,94 @@ categories.forEach(c => groups[c] = { sum: 0, items: [] });
 
 // 第二步：處理收入/支出的連動 (每到設定日期，自動入帳/扣款至台幣現金)
 let needsSave = false;
-const currentYearMonth = `${now.getFullYear()}-${curMonth.toString().padStart(2, '0')}`; // 建立今年當月的標籤，例如 "2026-05"
+const currentYearMonth = `${now.getFullYear()}-${curMonth.toString().padStart(2, '0')}`; 
 
-assets.forEach((item, idx) => {
-    // 檢查這是不是有設定「還款日/入帳日」的收入或支出項目
-    if ((item.category === '支出' || item.category === '收入'|| item.category === '定期定額') && item.repayDay && item.repayDay !== 0) {
+for (let idx = 0; idx < assets.length; idx++) {
+    const item = assets[idx];
+    
+    // 修正：最外層必須包含「貸款」
+    if ((item.category === '支出' || item.category === '收入' || item.category === '定期定額' || item.category === '貸款') && item.repayDay && item.repayDay !== 0) {
         
-        // 條件 1：今天的日期已經大於或等於設定的入帳日
         const isTimeUp = (curDay >= item.repayDay);
-        
-        // 條件 2：這個月這個項目還沒有被執行過入帳
         const notProcessedThisMonth = (item.lastProcessedMonth !== currentYearMonth);
 
-// ====== 定期定額專屬邏輯 ======
+        // 關鍵：所有自動扣款項目，都必須同時滿足「時間到」且「當月未處理」
+        if (isTimeUp && notProcessedThisMonth) {
+            
+            // ====== 1. 定期定額邏輯 ======
             if (item.category === '定期定額') {
                 const fixedAmount = Number(item.repayAmount) || 0;
                 let queryTarget = item.originalSymbol || item.symbol;
 
                 console.log(`[定期定額觸發] 項目: ${item.symbol}，發送台股代碼: ${queryTarget}`);
 
-                getPrice(queryTarget).then(latestPrice => {
+                try {
+                    const latestPrice = await getPrice(queryTarget);
                     let currentPrice = parseFloat(latestPrice);
-                    if (!currentPrice || isNaN(currentPrice)) {
-                        console.error(`無法取得 ${item.symbol} 的即時價格，暫不執行扣款。`);
-                        return;
-                    }
+                    
+                    if (currentPrice && !isNaN(currentPrice)) {
+                        const buyQty = Math.floor(fixedAmount / currentPrice);
 
-                    // 無條件捨去計算股數 (例: 1000 / 225 = 4 股)
-                    const buyQty = Math.floor(fixedAmount / currentPrice);
+                        if (buyQty > 0) {
+                            const actualCost = buyQty * currentPrice;
 
-                    if (buyQty > 0) {
-                        const actualCost = buyQty * currentPrice; // 精準計算實際扣款金額
+                            assets[idx].qty = (parseFloat(assets[idx].qty) || 0) + buyQty;
+                            assets[idx].price = currentPrice;
 
-                        assets[idx].qty = (parseFloat(assets[idx].qty) || 0) + buyQty;
-                        assets[idx].price = currentPrice;
-
-                        // 連動扣除台幣現金
-                        if (twdCashItem) {
-                            assets[twdCashItem.i].qty -= actualCost;
-                            console.log(`[定期定額成功] ${item.symbol} 買入 ${buyQty} 股，現金扣除 ${actualCost} 元`);
+                            if (twdCashItem) {
+                                assets[twdCashItem.i].qty -= actualCost;
+                                console.log(`[定期定額成功] ${item.symbol} 買入 ${buyQty} 股`);
+                            }
+                            
+                            // 確實標記並存檔
+                            assets[idx].lastProcessedMonth = currentYearMonth;
+                            needsSave = true;
                         }
                     }
-                });
+                } catch (err) {
+                    console.error(`價格獲取失敗: ${err}`);
+                }
             }
-            // ======  定期定額邏輯結束，以下接你原本的貸款與收支邏輯 ======
-        
-        if (isTimeUp && notProcessedThisMonth) {
-        // 1. 如果是貸款，走 PMT 自動拆利息公式
-          if (item.category === '貸款') {
-            const totalRepay = Number(item.repayAmount) || 0; 
-            const annualRate = Number(item.interestRate) || 0; // 從 M 欄讀取
-            const currentLoanBalance = Math.abs(Number(item.qty)) || 0; 
-
-            let principalPaid = totalRepay; 
-
-            if (annualRate > 0 && currentLoanBalance > 0) {
-                const monthlyRate = (annualRate / 100) / 12; 
-                const interestPaid = currentLoanBalance * monthlyRate; 
-                principalPaid = totalRepay - interestPaid; 
-                if (principalPaid < 0) principalPaid = 0; 
-            }
-
-            // 1. 更新剩餘貸款本金
-            assets[idx].qty += Number(principalPaid.toFixed(2));
             
-            // 2. 自動將已還期數（O欄）加 1
-            assets[idx].paidPeriods = (Number(assets[idx].paidPeriods) || 0) + 1;
+            // ====== 2. 貸款邏輯 ======
+            else if (item.category === '貸款') {
+                const totalRepay = Number(item.repayAmount) || 0; 
+                const annualRate = Number(item.interestRate) || 0; 
+                const currentLoanBalance = Math.abs(Number(item.qty)) || 0; 
+
+                let principalPaid = totalRepay; 
+
+                if (annualRate > 0 && currentLoanBalance > 0) {
+                    const monthlyRate = (annualRate / 100) / 12; 
+                    const interestPaid = currentLoanBalance * monthlyRate; 
+                    principalPaid = totalRepay - interestPaid; 
+                    if (principalPaid < 0) principalPaid = 0; 
+                }
+
+                assets[idx].qty += Number(principalPaid.toFixed(2));
+                assets[idx].paidPeriods = (Number(assets[idx].paidPeriods) || 0) + 1;
+                
+                assets[idx].lastProcessedMonth = currentYearMonth;
+                needsSave = true;
+                console.log(`[貸款自動化] 項目:${item.symbol}, 利息:${(totalRepay - principalPaid).toFixed(0)}, 實還本金:${principalPaid.toFixed(0)}`);
+            } 
             
-            assets[idx].lastProcessedMonth = currentYearMonth;
-            needsSave = true;
-            console.log(`[貸款自動化] 項目:${item.symbol}, 利息:${(totalRepay - principalPaid).toFixed(0)}, 實還本金:${principalPaid.toFixed(0)}`);
-          
-          // 2. 如果是一般收支，維持你原本的連動台幣現金邏輯
-          } else if (twdCashItem) {
-                // 取得要變動的金額：優先使用修改過的固定扣款金額 repayAmount，若無則使用 qty
+            // ====== 3. 一般收支連動 ======
+            else if (twdCashItem) {
                 const baseAmount = item.repayAmount || item.qty || 0;
                 const val = item.currency === 'USD' ? (item.price * baseAmount * usdToTwd) : (item.price * baseAmount);
                 
-                // 執行變動（支出項目在輸入時若為負數，這裡加算 val 就會自然變成扣款）
                 assets[twdCashItem.i].qty += val;
                 
-                //  關鍵核心：標記「今年當月」已處理，這樣這個月內就算天天打開網頁，也絕不會重複扣款/入帳
                 assets[idx].lastProcessedMonth = currentYearMonth;
-                assets[idx].isProcessed = true; // 相容舊版標記
+                assets[idx].isProcessed = true; 
                 needsSave = true;
                 
                 console.log(`[自動入帳成功] 項目: ${item.symbol}, 金額: ${val}, 已計入台幣現金。`);
             }
         }
     }
-});
+}
 
 // 如果數據有變動，存檔並跳出，讓 saveAndRefresh 重新觸發一次乾淨的 refresh
 if (needsSave) {
