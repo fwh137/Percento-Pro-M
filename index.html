@@ -262,7 +262,7 @@ input:not([type="checkbox"]), select {
 
         <label class="check-row">
             <input type="checkbox" id="enableRepay" onchange="document.getElementById('debtFields').style.display = this.checked ? 'block' : 'none'"> 
-            每月固定支出/還款 (自動扣款)
+            每月自動扣款 / 定期定額 / 還款
         </label>
 
 <div id="debtFields" style="display:none; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 14px; margin-top: 5px; margin-bottom: 5px;">
@@ -604,7 +604,7 @@ const currentYearMonth = `${now.getFullYear()}-${curMonth.toString().padStart(2,
 
 assets.forEach((item, idx) => {
     // 檢查這是不是有設定「還款日/入帳日」的收入或支出項目
-    if ((item.category === '支出' || item.category === '收入') && item.repayDay && item.repayDay !== 0) {
+    if ((item.category === '支出' || item.category === '收入'|| item.category === '定期定額') && item.repayDay && item.repayDay !== 0) {
         
         // 條件 1：今天的日期已經大於或等於設定的入帳日
         const isTimeUp = (curDay >= item.repayDay);
@@ -612,6 +612,44 @@ assets.forEach((item, idx) => {
         // 條件 2：這個月這個項目還沒有被執行過入帳
         const notProcessedThisMonth = (item.lastProcessedMonth !== currentYearMonth);
 
+// ====== 定期定額專屬邏輯 ======
+            if (item.category === '定期定額') {
+                const fixedAmount = Number(item.repayAmount) || 0;
+                let queryTarget = item.originalSymbol || item.symbol;
+
+                // 如果是純數字（例: 0050），強制補上 .TW 傳給 getPrice，防止港股干擾
+                if (/^\d+$/.test(queryTarget)) {
+                    queryTarget = queryTarget + '.TW';
+                }
+                
+                console.log(`[定期定額觸發] 項目: ${item.symbol}，發送台股代碼: ${queryTarget}`);
+
+                getPrice(queryTarget).then(latestPrice => {
+                    let currentPrice = parseFloat(latestPrice);
+                    if (!currentPrice || isNaN(currentPrice)) {
+                        console.error(`無法取得 ${item.symbol} 的即時價格，暫不執行扣款。`);
+                        return;
+                    }
+
+                    // 無條件捨去計算股數 (例: 1000 / 225 = 4 股)
+                    const buyQty = Math.floor(fixedAmount / currentPrice);
+
+                    if (buyQty > 0) {
+                        const actualCost = buyQty * currentPrice; // 精準計算實際扣款金額
+
+                        assets[idx].qty = (parseFloat(assets[idx].qty) || 0) + buyQty;
+                        assets[idx].price = currentPrice;
+
+                        // 連動扣除台幣現金
+                        if (twdCashItem) {
+                            assets[twdCashItem.i].qty -= actualCost;
+                            console.log(`[定期定額成功] ${item.symbol} 買入 ${buyQty} 股，現金扣除 ${actualCost} 元`);
+                        }
+                    }
+                });
+            }
+            // ======  定期定額邏輯結束，以下接你原本的貸款與收支邏輯 ======
+        
         if (isTimeUp && notProcessedThisMonth) {
         // 1. 如果是貸款，走 PMT 自動拆利息公式
           if (item.category === '貸款') {
@@ -647,7 +685,7 @@ assets.forEach((item, idx) => {
                 // 執行變動（支出項目在輸入時若為負數，這裡加算 val 就會自然變成扣款）
                 assets[twdCashItem.i].qty += val;
                 
-                // 🔴 關鍵核心：標記「今年當月」已處理，這樣這個月內就算天天打開網頁，也絕不會重複扣款/入帳
+                //  關鍵核心：標記「今年當月」已處理，這樣這個月內就算天天打開網頁，也絕不會重複扣款/入帳
                 assets[idx].lastProcessedMonth = currentYearMonth;
                 assets[idx].isProcessed = true; // 相容舊版標記
                 needsSave = true;
@@ -656,66 +694,6 @@ assets.forEach((item, idx) => {
             }
         }
     }
-    // ====== 🔴 這裡開始：緊接在後，新增「定期定額」即時價格同步與扣款邏輯 ======
-    if (item.category === "定期定額" || item.type === "定期定額" || item.category === "存股") {
-        // 直接復用你手動在 UI 輸入的 repayDay(扣款日) 與 repayAmount(每月定額)
-        const deductDay = Number(item.repayDay) || 0;       
-        const fixedAmount = Number(item.repayAmount) || 0; 
-        
-        // 只有在你有設定日期與金額，且今天到了扣款日、本月尚未處理過時才觸發
-        if (deductDay > 0 && fixedAmount > 0 && curDay >= deductDay && item.lastProcessedMonth !== currentYearMonth) {
-            
-            console.log(`[定期定額觸發] 項目: ${item.symbol}，開始同步當日最新價格...`);
-            let queryTarget = item.originalSymbol || item.symbol;
-        // 如果輸入的是純數字（例如 "0050"），自動幫它補上 ".TW" 避免抓到港股
-        if (/^\d+$/.test(queryTarget)) {
-            queryTarget = queryTarget + '.TW'; 
-        }
-            
-            // 解決你的核心痛點：扣款當下直接呼叫 getPrice 抓最新價格，不使用過期舊價格
-            getPrice(queryTarget).then(latestPrice => {
-                let currentPrice = parseFloat(latestPrice);
-                
-                if (!currentPrice || isNaN(currentPrice)) {
-                    console.error(`無法取得 ${item.symbol} 的即時價格，本月暫不執行扣款。`);
-                    return;
-                }
-                
-                // 1. 計算無條件捨去後的零股股數
-                const buyQty = Math.floor(fixedAmount / currentPrice);
-                
-                if (buyQty > 0) {
-                    // 2. 計算精準的實際扣款金額 (例：4股 * 225元 = 900元)
-                    const actualCost = buyQty * currentPrice;
-                    
-                    // 3. 更新該檔股票的持股數量，並將價格同步為當日最新價格
-                    assets[idx].qty = (parseFloat(assets[idx].qty) || 0) + buyQty;
-                    assets[idx].price = currentPrice; 
-                    
-                    // 4. 連動扣除台幣現金
-                    if (twdCashItem) {
-                        // 這裡利用你在 refresh() 前段已經鎖定好的 twdCashItem 連動修改
-                        assets[twdCashItem.i].qty -= actualCost;
-                        console.log(`[定期定額成功] ${item.symbol} 買入 ${buyQty} 股，現金扣除 ${actualCost} 元`);
-                    } else {
-                        // 備用安全防線：如果上面沒抓到 twdCashItem，用原本的 find 撈一次
-                        let cashAccount = assets.find(a => a.symbol === '台幣現金' || a.originalSymbol === '台幣現金');
-                        if (cashAccount) cashAccount.qty -= actualCost;
-                    }
-                    
-                    // 5. 標記本月已處理，並強制存盤、重整 UI
-                    assets[idx].lastProcessedMonth = currentYearMonth;
-                    saveAndRefresh(); 
-                } else {
-                    console.log(`[定期定額提示] 金額 ${fixedAmount} 不足購買 1 股 ${item.symbol} (價格 ${currentPrice})`);
-                    // 即使不夠買，也要標記本月已檢查過，避免天天提示
-                    assets[idx].lastProcessedMonth = currentYearMonth;
-                    saveAndRefresh();
-                }
-            });
-        }
-    }
-    // ====== 🔴 定期定額邏輯結束 ======
 });
 
 // 如果數據有變動，存檔並跳出，讓 saveAndRefresh 重新觸發一次乾淨的 refresh
