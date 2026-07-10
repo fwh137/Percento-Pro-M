@@ -821,7 +821,7 @@ const finalDay = item.repayDay || 0;
             <div class="qty-badge" style="cursor:pointer; margin-bottom: 4px;" onclick="const q=prompt('修改數量/金額', '${item.qty}'); if(q!==null){assets[${itemIdx}].qty=Number(q); saveAndRefresh();}">
     ${(() => {
         // 優先讀取後端 item.unit，若無則走原本的股/美元/台幣邏輯
-        const displayUnit = item.unit ? item.unit : (item.category.includes('股') ? '股' : (item.currency === 'USD' ? '美元' : '台幣'));
+        const displayUnit = item.unit ? item.unit : ((item.category.includes('股') || item.category === '定期定額') ? '股' : (item.currency === 'USD' ? '美元' : '台幣'));
         return `${Math.round(item.qty || 0).toLocaleString()} ${displayUnit} ✎`;
     })()}
 </div>
