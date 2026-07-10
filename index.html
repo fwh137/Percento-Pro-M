@@ -639,6 +639,7 @@ for (let idx = 0; idx < assets.length; idx++) {
 
                             assets[idx].qty = (parseFloat(assets[idx].qty) || 0) + buyQty;
                             assets[idx].price = currentPrice;
+                            assets[idx].unit = '股'; // 強制寫入單位為「股」
 
                             if (twdCashItem) {
                                 assets[twdCashItem.i].qty -= actualCost;
