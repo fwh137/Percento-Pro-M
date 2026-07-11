@@ -569,6 +569,7 @@ async function refresh() {
         const container = document.getElementById('categoryList');
         container.innerHTML = '';
         currentTotal = 0;
+let assetOnlyTotal = 0;
         
         // --- 時間顯示邏輯 ---
         const now = new Date();
@@ -585,8 +586,44 @@ async function refresh() {
         const groups = {};
 categories.forEach(c => groups[c] = { sum: 0, items: [] });
 
+// --- 第一步：準備渲染資料 (修復 finalProcessedItems 未定義報錯) ---
+    const finalProcessedItems = assets.map((a, i) => {
+        if (hiddenCategories.includes(a.category)) return null;
+        
+        const val = a.currency === 'USD' ? (a.price * a.qty * usdToTwd) : (a.price * a.qty);
+        
+        // 只有在「同時是收支項目」且「沒有設定固定扣款/入帳日」且「不是本月建立」的情況下，才予以隱藏。
+        // 有設定 repayDay 的固定項目在新月份會被安全保留。
+        const itemDate = a.date ? new Date(a.date) : now;
+        const isIncomeOrExpense = (a.category === '支出' || a.category === '收入');
+        const isFixedItem = (a.repayDay && a.repayDay !== 0);
+        const isNotCurrentMonth = (itemDate.getMonth() + 1 !== curMonth);
 
-// 第一步：先建立所有項目的基礎數據，並找到「台幣現金」物件
+        if (isIncomeOrExpense && !isFixedItem && isNotCurrentMonth) {
+            return null;
+        }
+
+        return { ...a, displayVal: val, i };
+    }).filter(x => x !== null);
+
+// --- 在此優先計算正確的 currentTotal (分母) ---
+    // 確保在跑渲染循環前，currentTotal 已經是排除收支後的「純資產總額」
+    currentTotal = finalProcessedItems.reduce((acc, item) => {
+        if (item.category !== '收入' && item.category !== '支出') {
+            return acc + item.displayVal;
+        }
+        return acc;
+    }, 0);
+
+// --- 讓 HTML 渲染時能抓到正確的純資產總額 ---
+assetOnlyTotal = finalProcessedItems.reduce((acc, item) => {
+    if (item.category !== '收入' && item.category !== '支出') {
+        return acc + Math.abs(item.displayVal);
+    }
+    return acc;
+}, 0);
+
+// 第二步：先建立所有項目的基礎數據，並找到「台幣現金」物件
     let twdCashItem = null;
     const tempProcessedItems = assets.map((a, i) => {
         if (hiddenCategories.includes(a.category)) return null;
@@ -604,7 +641,7 @@ categories.forEach(c => groups[c] = { sum: 0, items: [] });
         return itemObj;
     }).filter(x => x !== null);
 
-// 第二步：處理收入/支出的連動 (每到設定日期，自動入帳/扣款至台幣現金)
+// 第三步：處理收入/支出的連動 (每到設定日期，自動入帳/扣款至台幣現金)
 let needsSave = false;
 const currentYearMonth = `${now.getFullYear()}-${curMonth.toString().padStart(2, '0')}`; 
 
@@ -702,35 +739,6 @@ if (needsSave) {
     return; 
 }
 
-// --- 第三步：準備渲染資料 (修復 finalProcessedItems 未定義報錯) ---
-    const finalProcessedItems = assets.map((a, i) => {
-        if (hiddenCategories.includes(a.category)) return null;
-        
-        const val = a.currency === 'USD' ? (a.price * a.qty * usdToTwd) : (a.price * a.qty);
-        
-        // 只有在「同時是收支項目」且「沒有設定固定扣款/入帳日」且「不是本月建立」的情況下，才予以隱藏。
-        // 有設定 repayDay 的固定項目在新月份會被安全保留。
-        const itemDate = a.date ? new Date(a.date) : now;
-        const isIncomeOrExpense = (a.category === '支出' || a.category === '收入');
-        const isFixedItem = (a.repayDay && a.repayDay !== 0);
-        const isNotCurrentMonth = (itemDate.getMonth() + 1 !== curMonth);
-
-        if (isIncomeOrExpense && !isFixedItem && isNotCurrentMonth) {
-            return null;
-        }
-
-        return { ...a, displayVal: val, i };
-    }).filter(x => x !== null);
-
-// --- 在此優先計算正確的 currentTotal (分母) ---
-    // 確保在跑渲染循環前，currentTotal 已經是排除收支後的「純資產總額」
-    currentTotal = finalProcessedItems.reduce((acc, item) => {
-        if (item.category !== '收入' && item.category !== '支出') {
-            return acc + item.displayVal;
-        }
-        return acc;
-    }, 0);
-
     // 第四步：依照分類進行渲染
     categories.forEach((name, idx) => {
         const g = groups[name];
@@ -743,7 +751,7 @@ if (needsSave) {
 let displayPerc = "";
         if (currentTotal > 0) {
             // 計算佔比
-            const perc = ((g.sum / currentTotal) * 100).toFixed(1);
+            const perc = ((g.sum / currentTotal) * 100).toFixed(2);
 
         if (name !== '收入' && name !== '支出'){
 
@@ -849,9 +857,16 @@ const finalDay = item.repayDay || 0;
             ` : ''}
         </div>
 
-        <div style="text-align:right; display: flex; flex-direction: column; justify-content: center;">
-            <div style="font-weight:700; font-size: 1.1rem; color:${item.displayVal < 0 ? 'var(--negative)' : 'white'}">
-                ${isHidden ? '****' : '$' + Math.round(item.displayVal || 0).toLocaleString()}
+                <!-- 修正後的右側金額與百分比區塊 -->
+        <div style="text-align:right; display: flex; flex-direction: column; justify-content: center; align-items: flex-end;">
+            <div style="display: flex; align-items: center; gap: 6px; font-weight:700; font-size: 1.1rem; color:${item.displayVal < 0 ? 'var(--negative)' : 'white'}">
+                
+                <span style="color: var(--subtext); font-size: 0.85rem; font-weight: 400; margin-right: 2px;">
+                    ${(typeof assetOnlyTotal !== 'undefined' && assetOnlyTotal > 0) ? ((Math.abs(item.displayVal) / assetOnlyTotal) * 100).toFixed(2) : 0}%
+                </span>
+                <span>
+                    ${isHidden ? '****' : '$' + Math.round(item.displayVal || 0).toLocaleString()}
+                </span>
             </div>
             <span class="remove-link" style="cursor:pointer;" onclick="if(confirm('確定移除？')){assets.splice(${itemIdx},1); saveAndRefresh();}">移除</span>
         </div>
@@ -951,7 +966,7 @@ responsive: true,
 if (isHidden) {
                     return ` ${label}: $****`; 
                 }
-            let percent = ((value / assetOnlyTotal) * 100).toFixed(1);
+            let percent = ((value / assetOnlyTotal) * 100).toFixed(2);
             return ` ${label}: $${Math.round(value).toLocaleString()} (${percent}%)`;
 }
                         }
