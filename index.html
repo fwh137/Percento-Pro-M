@@ -372,7 +372,7 @@ async function updatePrices(targetCurrency) {
     for (let i = 0; i < assets.length; i++) {
         // 必須同時滿足「自動更新」且「幣別相符」才抓取
         // 分類如果是「定期定額」，就跳過不自動刷股票公式，防止重複計算入帳
-        if (assets[i].type === 'auto' && assets[i].currency === targetCurrency && assets[i].category !== '定期定額') {
+        if (assets[i].type === 'auto' && assets[i].currency === targetCurrency) {
             const queryTarget = assets[i].originalSymbol || assets[i].symbol;
 
             const latestPrice = await getPrice(queryTarget);
